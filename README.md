@@ -225,7 +225,7 @@ If you use this repo in academic work, please cite the original article and this
   title   = {RCPSP-CF-IVFTH: Bi-objective RCPSP with Cash-Flow under IVF Uncertainty},
   year    = {2025},
   note    = {Python/Pyomo implementation of extended IVF–TH scalarization for the model},
-  url     = {https://github.com/<your-org>/rcpsp-cf-ivfth}
+  url     = {https://github.com/diogoribeiro7/rcpsp-cf-ivfth}
 }
 ```
 
