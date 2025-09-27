@@ -21,8 +21,16 @@ This repository implements the model from:
 
 ## Repository layout
 
-- **`rcpsp_cf_ivfth.py`** -- all code in a single file (model, fuzzy numbers, toy instance, solver harness).
-- (Optional later) `rcpsp_cf_ivfth/` package split for larger instances.
+```
+rcpsp_cf_ivfth/
+├── __init__.py           # Main package exports
+├── fuzzy.py             # NIVTF fuzzy number definitions
+├── data.py              # Data structures (Activity, FinanceParams, etc.)
+├── model.py             # Main RCPSP_CF_IVFTH solver class
+└── examples/
+    ├── __init__.py
+    └── toy_instance.py   # Example usage with toy data
+```
 
 --------------------------------------------------------------------------------
 
@@ -36,7 +44,7 @@ poetry add pyomo
 # Add a MILP solver; choose one you have:
 # GLPK (Linux): sudo apt-get install glpk-utils
 # CBC (cross-platform via conda): conda install -c conda-forge coincbc
-poetry run python rcpsp_cf_ivfth.py
+poetry run python -m rcpsp_cf_ivfth.examples.toy_instance
 ```
 
 ### With pip
@@ -46,7 +54,7 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install pyomo
 # Install a solver (e.g., cbc or glpk) and ensure it's on PATH
-python rcpsp_cf_ivfth.py
+python -m rcpsp_cf_ivfth.examples.toy_instance
 ```
 
 > **Solver note:** Set the solver in code: `ivfth.solve(model, solver_name="glpk")`. Alternatives: `"cbc"`, `"gurobi"`, `"cplex"` (if licensed/installed).
@@ -55,10 +63,10 @@ python rcpsp_cf_ivfth.py
 
 ## Quick start (toy instance)
 
-The file ships with a minimal, runnable instance:
+Run the example with:
 
 ```bash
-python rcpsp_cf_ivfth.py
+python -m rcpsp_cf_ivfth.examples.toy_instance
 ```
 
 Expected console summary (varies by solver/params):
@@ -78,33 +86,71 @@ Solve summary:
 
 ## How to use with your data
 
-1. **Edit or replace** `build_toy_instance()`:
+```python
+from rcpsp_cf_ivfth import (
+    RCPSP_CF_IVFTH, Activity, ModeData, FinanceParams, CalendarParams,
+    IVFTHTargets, IVFTHWeights, NIVTF, create_triangle
+)
 
-  - Define activities with modes, NIVTF durations, NIVTF resource usage per day, and a payment per mode.
-  - Define finance parameters: interest rates (α, β, γ, δ), initial capital, loan caps, min CF, daily cost cap, resource unit costs.
-  - Define calendar: total days `T_days` and long periods `Y_periods = [(a_y, b_y)]`.
+# 1. Define your activities with modes, NIVTF durations, resource usage, and payments
+activities = {
+    "Start": Activity(
+        name="Start", predecessors=[],
+        modes={1: ModeData(
+            duration=NIVTF(*create_triangle(0, 0, 0)),
+            renewables={1: NIVTF(*create_triangle(0, 0, 0))},
+            nonrenewables={1: NIVTF(*create_triangle(0, 0, 0))},
+            payment=0.0
+        )}
+    ),
+    # ... define your real activities
+}
 
-2. **Choose IVF–TH targets** (PiS/NiS anchors) and weights:
+# 2. Define finance parameters
+finance = FinanceParams(
+    alpha_excess_cash=0.0125,   # Interest rates
+    beta_delayed_pay=0.10,
+    gamma_LTL=0.06,
+    delta_STL=0.075,
+    IC=10000.0,                 # Initial capital
+    max_LTL=5000.0,             # Loan limits
+    max_STL=4000.0,
+    min_CF=0.0,                 # Credit floor
+    CC_daily_cap=2000.0,        # Daily cost cap
+    CR_k={1: 10.0, 2: 8.0},     # Resource unit costs
+    CW_l={1: 50.0}
+)
 
-  ```python
-  targets = IVFTHTargets(
-      alpha_level=0.5,
-      Z1_PIS=..., Z1_NIS=...,
-      Z2_PIS=..., Z2_NIS=...
-  )
-  weights = IVFTHWeights(theta1=0.5, theta2=0.5, gamma_tradeoff=0.5)
-  ```
+# 3. Define calendar with periods
+calendar = CalendarParams(
+    T_days=60,
+    Y_periods=[(1, 30), (31, 60)]  # Two 30-day periods
+)
 
-  - **Z1 (Cmax) PiS/NiS:** run a _min-Cmax_ single-objective to estimate a good PiS; set NiS as a safe upper bound (e.g., horizon).
-  - **Z2 (final CF) PiS/NiS:** run a _max-CF_ single-objective for PiS; set NiS to a conservative lower bound (e.g., 0 or minCF).
+# 4. Choose IVF–TH targets (PiS/NiS anchors) and weights
+targets = IVFTHTargets(
+    alpha_level=0.5,
+    Z1_PIS=10.0,    # Best makespan (pre-run min-Cmax to estimate)
+    Z1_NIS=60.0,    # Worst makespan bound
+    Z2_PIS=30000.0, # Best final CF (pre-run max-CF to estimate)
+    Z2_NIS=0.0      # Worst final CF bound
+)
 
-3. **Build & solve:**
+weights = IVFTHWeights(theta1=0.5, theta2=0.5, gamma_tradeoff=0.5)
 
-  ```python
-  ivfth = RCPSP_CF_IVFTH(activities, finance, calendar)
-  model = ivfth.build_model(targets, weights)
-  result = ivfth.solve(model, solver_name="cbc")
-  ```
+# 5. Build & solve
+ivfth = RCPSP_CF_IVFTH(activities, finance, calendar)
+model = ivfth.build_model(targets, weights)
+result = ivfth.solve(model, solver_name="cbc")
+print(result)
+```
+
+## Finding PiS/NiS targets
+
+For best results, pre-compute the PiS/NiS anchors by solving single-objective problems:
+
+- **Z1 (Cmax) PiS/NiS:** Run a _min-Cmax_ single-objective to estimate a good PiS; set NiS as a safe upper bound (e.g., horizon).
+- **Z2 (final CF) PiS/NiS:** Run a _max-CF_ single-objective for PiS; set NiS to a conservative lower bound (e.g., 0 or minCF).
 
 --------------------------------------------------------------------------------
 
@@ -113,27 +159,23 @@ Solve summary:
 - **NIVTF(ao_L, am_L, ap_L, ao_U, am_U, ap_U)** With ordering: `ao_U < ao_L < am_L == am_U < ap_L < ap_U`.
 
 - **ModeData**
-
   - `duration: NIVTF`
   - `renewables: Dict[int, NIVTF]` (k → NIVTF per day)
   - `nonrenewables: Dict[int, NIVTF]` (l → NIVTF per day)
   - `payment: float`
 
 - **Activity**
-
   - `name: str`
   - `predecessors: List[str]`
   - `modes: Dict[int, ModeData]` (mode id → ModeData)
 
 - **FinanceParams**
-
   - `alpha_excess_cash, beta_delayed_pay, gamma_LTL, delta_STL: float`
   - `IC, max_LTL, max_STL, min_CF, CC_daily_cap: float`
   - `CR_k: Dict[int, float]` (renewable unit costs)
   - `CW_l: Dict[int, float]` (non-renewable unit costs)
 
 - **CalendarParams**
-
   - `T_days: int`
   - `Y_periods: List[Tuple[int,int]]` (1-based day windows)
 
@@ -142,7 +184,6 @@ Solve summary:
 ## Model overview (constraints)
 
 - **Scheduling**
-
   - Start once per activity: `∑_{m,t} X_{i,m,t} = 1`
   - Precedence with fuzzy durations (NIVTF α-blend): `t_j ≥ t_i + [α E2_L + (1-α) E1_L]`
   - Completion linking with lower/upper bounds as in (33)–(34)
@@ -150,20 +191,17 @@ Solve summary:
   - Period mapping `XYp` (ties completion day to a long period)
 
 - **Resources & costs**
-
   - Daily renewable/non-renewable usage upper-bounded via α-blend linearization
   - Daily cost `BU_t` ≥ Σ(CR_k·BR_{k,t}) + Σ(CW_l·WR_{l,t})
   - Daily cap: `BU_t ≤ CC`
 
 - **Finance & cash flow**
-
   - Periodic total cost: `TBU_y = ∑ BU_t` in `[a_y, b_y]`
   - Cash flow recurrences with interest on **excess**, **delayed payments**, **loans**
   - Loan caps (`LTL ≤ maxLTL`, `STL_y ≤ maxSTL`), CF floors (`CF_y ≥ minCF`)
   - Delayed payments balance (≤ 1 period delay)
 
 - **Objectives (IVF–TH)**
-
   - Z1 = `Cmax`, Z2 = `CF_{Y_n}`
   - Memberships `μ1, μ2` linear in (Z1, Z2) using PiS/NiS anchors
   - Scalarization: `max γ·λ + (1-γ)(θ1 μ1 + θ2 μ2)` with `λ ≤ μ1, λ ≤ μ2`
