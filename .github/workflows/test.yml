@@ -35,8 +35,8 @@ jobs:
     
     - name: Install CBC solver (cross-platform)
       run: |
-        pip install --upgrade pip
-        pip install pyomo
+        python -m pip install --upgrade pip
+        python -m pip install pyomo
         # Try to get CBC via conda if available, otherwise skip
         python -c "
         try:
@@ -50,9 +50,9 @@ jobs:
     
     - name: Install Python dependencies
       run: |
-        pip install --upgrade pip
-        pip install -r requirements-test.txt
-        pip install -e .
+        python -m pip install --upgrade pip
+        python -m pip install pytest pytest-cov pyomo
+        python -m pip install pytest-xdist
     
     - name: Check solver availability
       run: |
@@ -101,10 +101,9 @@ jobs:
     
     - name: Install Python dependencies (no solvers)
       run: |
-        pip install --upgrade pip
-        pip install pytest pytest-cov
-        pip install pyomo  # Install Pyomo but no solvers
-        pip install -e .
+        python -m pip install --upgrade pip
+        python -m pip install pytest pytest-cov
+        python -m pip install pyomo  # Install Pyomo but no solvers
     
     - name: Run tests without solver dependency
       run: |
@@ -118,25 +117,28 @@ jobs:
         available = [s for s in solvers if SolverFactory(s).available()]
         print(f'Available solvers: {available}')
         assert len(available) == 0, f'Expected no solvers, but found: {available}'
-        print('✓ Confirmed no solvers available - tests should skip solver-dependent functionality')
+        print('Confirmed no solvers available - tests should skip solver-dependent functionality')
         "
 
   lint:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10"]
     
     steps:
     - uses: actions/checkout@v3
     
-    - name: Set up Python 3.10
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: "3.10"
+        python-version: ${{ matrix.python-version }}
     
     - name: Install linting dependencies
       run: |
-        pip install --upgrade pip
-        pip install flake8 black isort mypy
-        pip install -e .
+        python -m pip install --upgrade pip
+        python -m pip install black flake8 isort mypy
+        python -m pip install pyomo
     
     - name: Run black (code formatting)
       run: |
