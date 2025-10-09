@@ -1,0 +1,156 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y glpk-utils
+    
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install glpk
+    
+    - name: Install CBC solver (cross-platform)
+      run: |
+        pip install --upgrade pip
+        pip install pyomo
+        # Try to get CBC via conda if available, otherwise skip
+        python -c "
+        try:
+            import subprocess
+            subprocess.check_call(['conda', 'install', '-c', 'conda-forge', 'coincbc', '-y'])
+            print('CBC installed via conda')
+        except:
+            print('CBC installation skipped - will use GLPK or skip solver tests')
+        "
+      continue-on-error: true
+    
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements-test.txt
+        pip install -e .
+    
+    - name: Check solver availability
+      run: |
+        python -c "
+        from pyomo.environ import SolverFactory
+        for solver in ['glpk', 'cbc']:
+            try:
+                opt = SolverFactory(solver)
+                if opt.available():
+                    print(f'{solver}: Available')
+                else:
+                    print(f'{solver}: Not available')
+            except:
+                print(f'{solver}: Error checking')
+        "
+    
+    - name: Run tests without coverage (non-Ubuntu)
+      if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.10'
+      run: |
+        python run_tests.py --fast
+    
+    - name: Run tests with coverage (Ubuntu Python 3.10)
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+      run: |
+        python run_tests.py --coverage --html-coverage
+    
+    - name: Upload coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  test-no-solver:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    
+    - name: Install Python dependencies (no solvers)
+      run: |
+        pip install --upgrade pip
+        pip install pytest pytest-cov
+        pip install pyomo  # Install Pyomo but no solvers
+        pip install -e .
+    
+    - name: Run tests without solver dependency
+      run: |
+        python run_tests.py --no-solver -v
+    
+    - name: Verify no solvers available
+      run: |
+        python -c "
+        from pyomo.environ import SolverFactory
+        solvers = ['glpk', 'cbc', 'gurobi', 'cplex']
+        available = [s for s in solvers if SolverFactory(s).available()]
+        print(f'Available solvers: {available}')
+        assert len(available) == 0, f'Expected no solvers, but found: {available}'
+        print('✓ Confirmed no solvers available - tests should skip solver-dependent functionality')
+        "
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    
+    - name: Install linting dependencies
+      run: |
+        pip install --upgrade pip
+        pip install flake8 black isort mypy
+        pip install -e .
+    
+    - name: Run black (code formatting)
+      run: |
+        black --check --diff rcpsp_cf_ivfth/ tests/
+    
+    - name: Run isort (import sorting)
+      run: |
+        isort --check-only --diff rcpsp_cf_ivfth/ tests/
+    
+    - name: Run flake8 (linting)
+      run: |
+        flake8 rcpsp_cf_ivfth/ tests/ --max-line-length=100 --extend-ignore=E203,W503
+    
+    - name: Run mypy (type checking)
+      run: |
+        mypy rcpsp_cf_ivfth/ --ignore-missing-imports
+      continue-on-error: true
