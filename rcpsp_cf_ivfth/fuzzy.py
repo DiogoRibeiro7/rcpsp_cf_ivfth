@@ -109,24 +109,24 @@ def create_triangle(a0: float, am: float, ap: float, widen: float = 1.0) -> Tupl
     span_right = ap - am
 
     if span_left <= 0 and span_right <= 0:
-        epsilon = max(1e-3, 0.05 * max(1.0, abs(am)))
-        ao_U = am - epsilon
-        ao_L = am
-        ap_L = am + 0.25 * epsilon
-        ap_U = am + epsilon
         am_L = am_U = am
-        return (ao_L, am_L, ap_L, ao_U, am_U, ap_U)
+        return (am, am_L, am, am, am_U, am)
 
-    # Allow widening factors even when spans are very small.
-    span_left = span_left if span_left > 0 else max(span_right, 1.0) * 0.1
-    span_right = span_right if span_right > 0 else max(span_left, 1.0) * 0.1
+    base_left = span_left if span_left > 0 else max(span_right, 1.0) * 0.1
+    base_right = span_right if span_right > 0 else max(span_left, 1.0) * 0.1
 
-    # Upper triangle further away, lower triangle closer, share am
-    ao_U = am - (span_left + widen * span_left * 0.5)
-    ap_U = am + (span_right + widen * span_right * 0.5)
+    ao_L = a0 + 0.25 * widen * base_left
+    ao_L = min(ao_L, am)
+    ao_L = max(ao_L, 0.0)
 
-    ao_L = am - (span_left - widen * span_left * 0.25)
-    ap_L = am + (span_right - widen * span_right * 0.25)
+    ao_U = a0 - 0.5 * widen * base_left
+    ao_U = max(ao_U, 0.0)
+    ao_U = min(ao_U, ao_L)
+
+    ap_L = ap - 0.25 * widen * base_right
+    ap_L = max(ap_L, am)
+    ap_U = ap + 0.5 * widen * base_right
+    ap_U = max(ap_U, ap_L)
 
     am_L = am_U = am
     return (ao_L, am_L, ap_L, ao_U, am_U, ap_U)

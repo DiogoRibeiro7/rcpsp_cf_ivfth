@@ -79,3 +79,35 @@ If you expose multiple scenario builders, wire them to CLI arguments or environm
 
 - Run `pytest` to ensure your custom instance still satisfies the structural tests in `tests/test_examples.py`.
 - Enable solver logs (`solver_options={"tee": True}`) when debugging infeasibilities or non-optimal status reports.
+
+## 5. Visualize results
+
+After solving, call `RCPSP_CF_IVFTH.extract_solution()` to obtain a structured dictionary and use the helpers in `rcpsp_cf_ivfth.visualization`:
+
+```python
+from rcpsp_cf_ivfth import (
+    RCPSP_CF_IVFTH, IVFTHTargets, IVFTHWeights,
+    create_gantt_chart, plot_resource_usage,
+    plot_cash_flow, plot_loan_usage,
+    export_solution_json, export_solution_csv,
+)
+from rcpsp_cf_ivfth.examples import build_toy_instance
+
+activities, finance, calendar = build_toy_instance()
+ivfth = RCPSP_CF_IVFTH(activities, finance, calendar, logging_enabled=True)
+
+targets = IVFTHTargets(alpha_level=0.5, Z1_PIS=10.0, Z1_NIS=60.0, Z2_PIS=30000.0, Z2_NIS=0.0)
+weights = IVFTHWeights(theta1=0.5, theta2=0.5, gamma_tradeoff=0.5)
+model = ivfth.build_model(targets, weights)
+result = ivfth.solve(model, solver_name="cbc", tee=False)
+
+solution = ivfth.extract_solution(model, solver_metadata=result)
+create_gantt_chart(solution)
+plot_resource_usage(solution, resource_type="renewable")
+plot_cash_flow(solution)
+plot_loan_usage(solution)
+export_solution_json(solution, "solution.json")
+export_solution_csv(solution, "solution_export")
+```
+
+Install `matplotlib` (`pip install matplotlib`) to enable the plotting utilities. The exported JSON/CSV files can be loaded into spreadsheets or BI tools for deeper analysis.

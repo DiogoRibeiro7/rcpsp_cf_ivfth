@@ -39,6 +39,14 @@ from .data import (
     IVFTHWeights,
 )
 from .fuzzy import NIVTF, create_triangle
+from .visualization import (
+    create_gantt_chart,
+    plot_resource_usage,
+    plot_cash_flow,
+    plot_loan_usage,
+    export_solution_json,
+    export_solution_csv,
+)
 
 __all__ = [
     "RCPSP_CF_IVFTH",
@@ -50,4 +58,10 @@ __all__ = [
     "IVFTHWeights",
     "NIVTF",
     "create_triangle",
+    "create_gantt_chart",
+    "plot_resource_usage",
+    "plot_cash_flow",
+    "plot_loan_usage",
+    "export_solution_json",
+    "export_solution_csv",
 ]
