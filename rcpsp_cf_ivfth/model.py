@@ -85,15 +85,15 @@ class RCPSP_CF_IVFTH:
     @staticmethod
     def _duration_alpha_L(nivtf: NIVTF, alpha: float, use_lower: bool = True) -> Tuple[float, float]:
         """
-        Return α-weighted expected duration components E1_L and E2_L:
-            lower:    α*E2_L + (1-α)*E1_L    (used in precedence lower bound)
-            upper:    (1-α/2)*E2_L + (α/2)*E1_L or (α/2)*E2_L + (1-α/2)*E1_L (per paper's (33),(34))
+        Return alpha-weighted expected duration components E1_L and E2_L:
+            lower:    alpha*E2_L + (1-alpha)*E1_L    (used in precedence lower bound)
+            upper:    (1-alpha/2)*E2_L + (alpha/2)*E1_L or (alpha/2)*E2_L + (1-alpha/2)*E1_L (per paper's (33),(34))
         This helper focuses on the LOWER side used in constraints (30), (33), (34).
 
         For constraints:
-            (30): t_j >= t_i + [ α*E2_L + (1-α)*E1_L ]
-            (33): sum t*X_P >= sum (t + α/2 *E2_L + (1-α/2)*E1_L) * X_start
-            (34): sum t*X_P <= sum (t + (1-α/2)*E2_L + α/2 *E1_L) * X_start
+            (30): t_j >= t_i + [ alpha*E2_L + (1-alpha)*E1_L ]
+            (33): sum t*X_P >= sum (t + alpha/2 *E2_L + (1-alpha/2)*E1_L) * X_start
+            (34): sum t*X_P <= sum (t + (1-alpha/2)*E2_L + alpha/2 *E1_L) * X_start
 
         We expose E2_L and E1_L so we can combine as needed by callers.
         """
@@ -109,8 +109,8 @@ class RCPSP_CF_IVFTH:
     @staticmethod
     def _res_use_alpha_L(nivtf: NIVTF, alpha: float) -> float:
         """
-        Return α-blended expected resource use per day on LOWER side for constraints (31),(32):
-            ((1 - α) * E2_L + α * E1_L)
+        Return alpha-blended expected resource use per day on LOWER side for constraints (31),(32):
+            ((1 - alpha) * E2_L + alpha * E1_L)
         """
         E1L = nivtf.E1_L()
         E2L = nivtf.E2_L()
@@ -173,7 +173,7 @@ class RCPSP_CF_IVFTH:
         m.Y = PySet(initialize=Y, ordered=True)
         m.K = PySet(initialize=K, ordered=True)
         m.L = PySet(initialize=L, ordered=True)
-        m.M_i = {i: PySet(initialize=M_i[i], ordered=True) for i in I}
+        m.M_i = PySet(m.I, initialize=lambda _m, i: M_i[i], ordered=True)
 
         # Helper: map (y) -> [a_y, b_y]
         m.a = Param(m.Y, initialize={y: TY[y][0] for y in Y}, within=Integers)
@@ -242,7 +242,7 @@ class RCPSP_CF_IVFTH:
                 PA_im[(i, mm)] = acts[i].modes[mm].payment
         m.PA_im = Param(((i, mm) for i in I for mm in M_i[i]), initialize=PA_im, within=Reals, default=0.0)
 
-        # α-level for fuzzy crisping
+        # alpha-level for fuzzy crisping
         m.alpha = Param(initialize=alpha, within=Reals)
 
         # --------------------------
@@ -266,27 +266,27 @@ class RCPSP_CF_IVFTH:
             return sum(_m.X[(i, mm, t)] for mm in M_i[i] for t in T) == 1
         m.start_once = Constraint(m.I, rule=start_once_rule)
 
-        # (8)/(30) Precedence with fuzzy duration (lower-side α-blend)
+        # (8)/(30) Precedence with fuzzy duration (lower-side alpha-blend)
         def precedence_rule(_m, i, j):
             # sum t X[j] >= sum (t + alpha*E2_L + (1-alpha)*E1_L) X[i]
             # Build LHS and RHS
             lhs = sum(t * _m.X[(j, mmj, t)] for mmj in M_i[j] for t in T)
             rhs_expr = 0.0
             for mmi in M_i[i]:
-                # α-blended expected duration LOWER side:
+                # alpha-blended expected duration LOWER side:
                 E1L, E2L = self._duration_alpha_L(acts[i].modes[mmi].duration, alpha=_m.alpha.value, use_lower=True)
                 dur_alpha = _m.alpha * E2L + (1.0 - _m.alpha) * E1L
                 rhs_expr += sum((t + dur_alpha) * _m.X[(i, mmi, t)] for t in T)
             return lhs >= rhs_expr
         m.precedence = Constraint(m.P, rule=lambda _m, i, j: precedence_rule(_m, i, j))
 
-        # (9) Renewable resources per day: sum over active activities at day t of r_i,k * X_i(h) ≤ BR[k,t]
-        # Active if started at h and running h..(h+dur-1). We approximate with expected length at α-level:
-        # We linearize by upper-bounding daily need using the α-blend per (31) with window average.
+        # (9) Renewable resources per day: sum over active activities at day t of r_i,k * X_i(h) <= BR[k,t]
+        # Active if started at h and running h..(h+dur-1). We approximate with expected length at alpha-level:
+        # We linearize by upper-bounding daily need using the alpha-blend per (31) with window average.
         # Exact convolution is combinatorial; the paper uses a similar linearization window.
         def renewable_rule(_m, k, t):
             rhs = _m.BR[(k, t)]
-            # Sum_{i,m} Sum_{h} r_i,k(α-blend) * X[i,m,h] if activity spans t
+            # Sum_{i,m} Sum_{h} r_i,k(alpha-blend) * X[i,m,h] if activity spans t
             # Use expected span length for indexing window: we conservatively include starts h<=t
             lhs_terms = []
             for i in I:
@@ -316,27 +316,25 @@ class RCPSP_CF_IVFTH:
             return sum(lhs_terms) <= rhs
         m.nonrenewable = Constraint(m.L, m.T, rule=nonrenewable_rule)
 
-        # (11) Daily resource cost: sum_k CR_k * BR[k,t] + sum_l CW_l * WR[l,t] ≤ BU[t]
+        # (11) Daily resource cost: sum_k CR_k * BR[k,t] + sum_l CW_l * WR[l,t] <= BU[t]
         def daily_cost_rule(_m, t):
             return sum(_m.CR[k] * _m.BR[(k, t)] for k in K) + sum(_m.CW[l_] * _m.WR[(l_, t)] for l_ in L) <= _m.BU[t]
         m.daily_cost = Constraint(m.T, rule=daily_cost_rule)
 
-        # (12) BU[t] ≤ CC
+        # (12) BU[t] <= CC
         m.daily_cap = Constraint(m.T, rule=lambda _m, t: _m.BU[t] <= _m.CC)
 
         # (13), (14), (15)-(17): completion date variables and linking to periods
         # (13)+(14): For each activity i,m, sum_t Xp[i,m,t] = sum_t (t + dur_alpha_alt)*X[i,m,t].
         # Paper splits into (13) definition and (14) sum Xp over all m,t == 1. We'll adapt:
         def completion_link_rule(_m, i, mm):
-            # Sum_t t * Xp[i,mm,t] ∈ [sum (t + α/2 E2 + (1-α/2)E1) X[i,mm,t], sum (t + (1-α/2)E2 + α/2 E1) X[i,mm,t]]
+            # Sum_t t * Xp[i,mm,t] in [sum (t + alpha/2 E2 + (1-alpha/2)E1) X[i,mm,t], sum (t + (1-alpha/2)E2 + alpha/2 E1) X[i,mm,t]]
             E1L, E2L = self._duration_alpha_L(acts[i].modes[mm].duration, alpha=_m.alpha.value, use_lower=True)
             lower = sum((t + 0.5*_m.alpha * E2L + (1.0 - 0.5*_m.alpha) * E1L) * _m.X[(i, mm, t)] for t in T)
             upper = sum((t + (1.0 - 0.5*_m.alpha) * E2L + 0.5*_m.alpha * E1L) * _m.X[(i, mm, t)] for t in T)
             left = sum(t * _m.Xp[(i, mm, t)] for t in T)
             # Two inequalities:
             return (lower <= left, left <= upper)
-        m.completion_link_lo = ConstraintList := []
-        m.completion_link_hi = ConstraintList := []
         # Pyomo doesn't allow returning tuple lists from rule easily; add two constraints per (i,mm)
         m.comp_lo = _ConstraintList()
         m.comp_hi = _ConstraintList()
@@ -361,7 +359,7 @@ class RCPSP_CF_IVFTH:
         m.XYp_sum = Constraint(((i, mm, t) for i in I for mm in M_i[i] for t in T), rule=lambda _m, i, mm, t: XYp_sum_rule(_m, i, mm, t))
 
         def XYp_lb_rule(_m, i, mm, y, t):
-            # TY_{y-1} * XYp ≤ t * Xp   -> with TY_{y-1} meaning lower bound a_y
+            # TY_{y-1} * XYp <= t * Xp   -> with TY_{y-1} meaning lower bound a_y
             ay = _m.a[y]
             return ay * _m.XYp[(i, mm, y, t)] <= t * _m.Xp[(i, mm, t)]
         m.XYp_lb = Constraint(((i, mm, y, t) for i in I for mm in M_i[i] for y in Y for t in T), rule=XYp_lb_rule)
@@ -372,7 +370,7 @@ class RCPSP_CF_IVFTH:
         m.XYp_ub = Constraint(((i, mm, y, t) for i in I for mm in M_i[i] for y in Y for t in T), rule=XYp_ub_rule)
 
         # (18) Delayed payment balance per period:
-        # sum_{i,m,t} PA_im * XYp[i,m,y,t] - PA[y] ≤ DP[y]
+        # sum_{i,m,t} PA_im * XYp[i,m,y,t] - PA[y] <= DP[y]
         def delayed_pay_rule(_m, y):
             lhs = sum(_m.PA_im[(i, mm)] * _m.XYp[(i, mm, y, t)] for i in I for mm in M_i[i] for t in T)
             return lhs - _m.PA[y] <= _m.DP[y]
@@ -402,13 +400,13 @@ class RCPSP_CF_IVFTH:
             return _m.CF[y] == _m.STL[y] + _m.CF[y - 1] * ex + _m.PA[y] + _m.DP[y - 1] * bd - _m.TBU[y] - _m.LTL / gL - _m.STL[y - 1] / dS
         m.cfy = Constraint(m.Y, rule=CFy_rule)
 
-        # (22) LTL ≤ maxLTL
+        # (22) LTL <= maxLTL
         m.LTL_cap = Constraint(rule=lambda _m: _m.LTL <= _m.maxLTL)
 
-        # (23) STL[y] ≤ maxSTL
+        # (23) STL[y] <= maxSTL
         m.STL_cap = Constraint(m.Y, rule=lambda _m, y: _m.STL[y] <= _m.maxSTL)
 
-        # (24) CF[y] ≥ minCF
+        # (24) CF[y] >= minCF
         m.CF_floor = Constraint(m.Y, rule=lambda _m, y: _m.CF[y] >= _m.minCF)
 
         # --------------------------
@@ -417,32 +415,32 @@ class RCPSP_CF_IVFTH:
         Z1_PIS, Z1_NIS = targets.Z1_PIS, targets.Z1_NIS  # makespan (minimize)
         Z2_PIS, Z2_NIS = targets.Z2_PIS, targets.Z2_NIS  # final CF (maximize)
 
-        # Membership μ1 for Z1 (smaller is better):
-        #   μ1 = 1 if Cmax <= Z1_PIS
-        #   μ1 = (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS)  for Z1_PIS <= Cmax <= Z1_NIS
-        #   μ1 = 0 if Cmax >= Z1_NIS
+        # Membership mu1 for Z1 (smaller is better):
+        #   mu1 = 1 if Cmax <= Z1_PIS
+        #   mu1 = (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS)  for Z1_PIS <= Cmax <= Z1_NIS
+        #   mu1 = 0 if Cmax >= Z1_NIS
         # Encode with linear constraints:
-        #   μ1 ≥ 0
-        #   μ1 ≤ 1
-        #   μ1 ≤ (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS)
-        #   μ1 ≥ (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS) - bigM*(binary intervals)  [we avoid binaries; use inequality in the right sense]
-        # For TH, it suffices to *upper-bound* μ1 and μ2 and then maximize a convex combination; so:
+        #   mu1 >= 0
+        #   mu1 <= 1
+        #   mu1 <= (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS)
+        #   mu1 >= (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS) - bigM*(binary intervals)  [we avoid binaries; use inequality in the right sense]
+        # For TH, it suffices to *upper-bound* mu1 and mu2 and then maximize a convex combination; so:
         denom1 = max(1e-9, (Z1_NIS - Z1_PIS))
         m.mu1_le = Constraint(expr=m.mu1 <= (Z1_NIS - m.Cmax) / denom1)
 
-        # Membership μ2 for Z2 (larger is better):
-        #   μ2 = 1 if CF_Yn >= Z2_PIS
-        #   μ2 = (CF_Yn - Z2_NIS) / (Z2_PIS - Z2_NIS)  for Z2_NIS <= CF_Yn <= Z2_PIS
-        #   μ2 = 0 if CF_Yn <= Z2_NIS
+        # Membership mu2 for Z2 (larger is better):
+        #   mu2 = 1 if CF_Yn >= Z2_PIS
+        #   mu2 = (CF_Yn - Z2_NIS) / (Z2_PIS - Z2_NIS)  for Z2_NIS <= CF_Yn <= Z2_PIS
+        #   mu2 = 0 if CF_Yn <= Z2_NIS
         denom2 = max(1e-9, (Z2_PIS - Z2_NIS))
         m.mu2_le = Constraint(expr=m.mu2 <= (m.CF[Yn] - Z2_NIS) / denom2)
 
-        # λ ≤ μ1, λ ≤ μ2
+        # lambda <= mu1, lambda <= mu2
         m.lambda_le_mu1 = Constraint(expr=m.lambda_star <= m.mu1)
         m.lambda_le_mu2 = Constraint(expr=m.lambda_star <= m.mu2)
 
         # Final scalarization objective:
-        # maximize: gamma * λ  + (1 - gamma) * (θ1 * μ1 + θ2 * μ2)
+        # maximize: gamma * lambda  + (1 - gamma) * (theta1 * mu1 + theta2 * mu2)
         gamma = weights.gamma_tradeoff
         theta1 = weights.theta1
         theta2 = weights.theta2

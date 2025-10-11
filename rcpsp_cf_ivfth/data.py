@@ -121,7 +121,7 @@ class CalendarParams:
 @dataclass
 class IVFTHWeights:
     """
-    Weights for Torabi–Hassini scalarization.
+    Weights for the Torabi-Hassini scalarization.
 
     Attributes
     ----------
@@ -130,12 +130,12 @@ class IVFTHWeights:
     theta2 : float
         Weight for objective 2 membership (final cash-flow).
     gamma_tradeoff : float
-        Trade-off parameter ∈ [0,1].
-        Objective: maximize gamma_tradeoff * λ  + (1 - gamma_tradeoff) * (theta1*μ1 + theta2*μ2)
+        Trade-off parameter in [0, 1].
+        Objective: maximize ``gamma_tradeoff * zeta + (1 - gamma_tradeoff) * (theta1 * mu1 + theta2 * mu2)``.
 
     Notes
     -----
-    - θ1, θ2 ≥ 0 and θ1 + θ2 = 1 (we check with tolerance).
+    ``mu1`` and ``mu2`` are non-negative and satisfy ``mu1 + mu2 = 1`` (enforced with tolerance).
     """
     theta1: float
     theta2: float
@@ -152,12 +152,12 @@ class IVFTHWeights:
 @dataclass
 class IVFTHTargets:
     """
-    α-level and PiS/NiS targets for IVF-TH membership functions.
+    Alpha-level and PiS/NiS targets for IVF-TH membership functions.
 
     Attributes
     ----------
     alpha_level : float
-        α ∈ [0,1] used in fuzzy-to-crisp conversion in constraints (30)-(34).
+        Alpha in [0, 1] used in fuzzy-to-crisp conversion in constraints (30)-(34).
     Z1_PIS : float
         Positive ideal solution for Z1 (makespan), i.e., a *small* target (best).
     Z1_NIS : float
@@ -169,8 +169,8 @@ class IVFTHTargets:
 
     Notes
     -----
-    - These targets can be computed by separate runs (min Z1, max Z2) or set by domain knowledge.
-    - Memberships μ1, μ2 are then linear functions of Z1, Z2 using these PiS/NiS anchors.
+    These targets can be computed by separate runs (min Z1, max Z2) or set by domain knowledge.
+    The membership functions ``mu1`` and ``mu2`` are linear in ``Z1`` and ``Z2`` using these PiS/NiS anchors.
     """
     alpha_level: float
     Z1_PIS: float

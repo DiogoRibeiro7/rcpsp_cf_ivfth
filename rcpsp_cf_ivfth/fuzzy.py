@@ -43,17 +43,17 @@ class NIVTF:
 
     def __post_init__(self) -> None:
         # Basic checks for monotonicity and normalization consistency
-        if not (self.ao_U < self.ao_L < self.am_L <= self.am_U < self.ap_L < self.ap_U):
+        if not (self.ao_U <= self.ao_L <= self.am_L <= self.am_U <= self.ap_L <= self.ap_U):
             raise ValueError(
                 f"NIVTF ordering violated:\n"
-                f"Require ao_U < ao_L < am_L(=am_U) <= am_U < ap_L < ap_U\n"
+                f"Require ao_U <= ao_L <= am_L(=am_U) <= am_U <= ap_L <= ap_U\n"
                 f"Got: (ao_U, ao_L, am_L, am_U, ap_L, ap_U) = "
                 f"({self.ao_U}, {self.ao_L}, {self.am_L}, {self.am_U}, {self.ap_L}, {self.ap_U})"
             )
         if abs(self.am_L - self.am_U) > 1e-12:
             raise ValueError("Normalization requires am_L == am_U for NIVTF.")
 
-    # Expected (Jiménez-style) computations on LOWER side
+    # Expected (Jimenez-style) computations on LOWER side
     def E1_L(self) -> float:
         return 0.5 * (self.ao_L + self.am_L)
 
@@ -104,12 +104,29 @@ def create_triangle(a0: float, am: float, ap: float, widen: float = 1.0) -> Tupl
     >>> args = create_triangle(5, 7, 9, widen=0.5)
     >>> nivtf = NIVTF(*args)
     """
-    # Upper triangle further away, lower triangle closer, share am
-    ao_U = a0 - 0.5 * widen * (am - a0)
-    ap_U = ap + 0.5 * widen * (ap - am)
+    # Guard against degenerate triangles (e.g., a0 == am == ap) by expanding them slightly.
+    span_left = am - a0
+    span_right = ap - am
 
-    ao_L = a0 + 0.25 * widen * (am - a0)
-    ap_L = ap - 0.25 * widen * (ap - am)
+    if span_left <= 0 and span_right <= 0:
+        epsilon = max(1e-3, 0.05 * max(1.0, abs(am)))
+        ao_U = am - epsilon
+        ao_L = am
+        ap_L = am + 0.25 * epsilon
+        ap_U = am + epsilon
+        am_L = am_U = am
+        return (ao_L, am_L, ap_L, ao_U, am_U, ap_U)
+
+    # Allow widening factors even when spans are very small.
+    span_left = span_left if span_left > 0 else max(span_right, 1.0) * 0.1
+    span_right = span_right if span_right > 0 else max(span_left, 1.0) * 0.1
+
+    # Upper triangle further away, lower triangle closer, share am
+    ao_U = am - (span_left + widen * span_left * 0.5)
+    ap_U = am + (span_right + widen * span_right * 0.5)
+
+    ao_L = am - (span_left - widen * span_left * 0.25)
+    ap_L = am + (span_right - widen * span_right * 0.25)
 
     am_L = am_U = am
     return (ao_L, am_L, ap_L, ao_U, am_U, ap_U)
