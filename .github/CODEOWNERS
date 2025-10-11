@@ -1,0 +1,9 @@
+# Global default reviewers/owners
+* @DiogoRibeiro7
+
+# Tests and CI
+tests/ @DiogoRibeiro7
+.github/ @DiogoRibeiro7
+
+# Documentation
+docs/ @DiogoRibeiro7

@@ -216,6 +216,15 @@ For best results, pre-compute the PiS/NiS anchors by solving single-objective pr
 
 --------------------------------------------------------------------------------
 
+## Community & Support
+
+- Read the [Contributing guide](CONTRIBUTING.md) for setup instructions, coding standards, and workflow tips.
+- Participation is governed by our [Code of Conduct](CODE_OF_CONDUCT.md); please review it before engaging.
+- Report security issues privately via the process described in [SECURITY.md](SECURITY.md).
+- File bugs or feature requests using the GitHub issue templates; open pull requests against the `develop` branch.
+
+--------------------------------------------------------------------------------
+
 ## Citation
 
 If you use this repo in academic work, please cite the original article and this implementation:
