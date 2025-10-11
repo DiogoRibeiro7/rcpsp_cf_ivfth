@@ -47,6 +47,13 @@ from .visualization import (
     export_solution_json,
     export_solution_csv,
 )
+from .sensitivity import (
+    run_alpha_sweep,
+    run_weight_scenarios,
+    run_finance_scenarios,
+    sensitivity_analysis,
+    plot_metric_trends,
+)
 
 __all__ = [
     "RCPSP_CF_IVFTH",
@@ -64,4 +71,9 @@ __all__ = [
     "plot_loan_usage",
     "export_solution_json",
     "export_solution_csv",
+    "run_alpha_sweep",
+    "run_weight_scenarios",
+    "run_finance_scenarios",
+    "sensitivity_analysis",
+    "plot_metric_trends",
 ]
