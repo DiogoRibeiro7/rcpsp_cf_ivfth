@@ -1,5 +1,9 @@
 # RCPSP-CF-IVFTH
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.1733326.svg)](https://doi.org/10.5281/zenodo.1733326)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+
 Bi-objective **Resource-Constrained Project Scheduling with Cash-Flow** under **fuzzy uncertainty** (NIVTF), solved via an **extended IVF–TH** scalarization and MILP.
 
 This repository implements the model from:
@@ -229,12 +233,19 @@ For best results, pre-compute the PiS/NiS anchors by solving single-objective pr
 
 If you use this repo in academic work, please cite the original article and this implementation:
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.1733326.svg)](https://doi.org/10.5281/zenodo.1733326)
 ```bibtex
-@misc{rcpsp_cf_ivfth_implementation_2025,
-  title   = {RCPSP-CF-IVFTH: Bi-objective RCPSP with Cash-Flow under IVF Uncertainty},
-  year    = {2025},
-  note    = {Python/Pyomo implementation of extended IVF–TH scalarization for the model},
-  url     = {https://github.com/diogoribeiro7/rcpsp-cf-ivfth}
+@software{rcpsp_cf_ivfth_2025,
+  author       = {Ribeiro, Diogo},
+  title        = {{RCPSP-CF-IVFTH: Bi-objective Resource-Constrained 
+                   Project Scheduling with Cash-Flow under 
+                   Interval-Valued Fuzzy Uncertainty}},
+  month        = sep,
+  year         = 2025,
+  publisher    = {Zenodo},
+  version      = {1.0.0},
+  doi          = {10.5281/zenodo.1733326},
+  url          = {https://doi.org/10.5281/zenodo.1733326}
 }
 ```
 

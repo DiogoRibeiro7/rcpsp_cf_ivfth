@@ -20,6 +20,11 @@ url: "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
 license: MIT
 version: "1.0.0"
 date-released: "2025-09-11"
+doi: 10.5281/zenodo.1733326
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.1733326
+    description: "Zenodo DOI for all versions"
 keywords:
   - project-scheduling
   - RCPSP
@@ -44,6 +49,7 @@ preferred-citation:
       email: dfr@esmad.ipp.pt
   version: "1.0.0"
   date-released: "2025-09-11"
+  doi: 10.5281/zenodo.1733326
   repository-code: "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
   license: MIT
   notes: "Python/Pyomo implementation of the extended IVF-TH scalarization model"
