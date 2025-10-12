@@ -11,6 +11,7 @@
   "access_right": "open",
   "license": "MIT",
   "upload_type": "software",
+  "doi": "10.5281/zenodo.1733326",
   "keywords": [
     "project-scheduling",
     "RCPSP",
