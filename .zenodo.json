@@ -1,7 +1,7 @@
 {
   "title": "RCPSP-CF-IVFTH: Bi-objective Resource-Constrained Project Scheduling with Cash-Flow under Interval-Valued Fuzzy Uncertainty",
   "description": "Python implementation of a bi-objective Resource-Constrained Project Scheduling Problem with Cash Flow (RCPSP-CF) under interval-valued fuzzy uncertainty. The package implements an extended IVF-TH (Interval-Valued Fuzzy Torabi-Hassini) scalarization approach solved via mixed-integer linear programming (MILP) using Pyomo. Features include multi-mode activities, renewable and non-renewable resources, financial constraints (loans, interest, delayed payments), and uncertainty modeling via Normalized Interval-Valued Triangular Fuzzy (NIVTF) numbers.",
-  "version": "v1.0.0",
+  "version": "v1.0.1",
   "upload_type": "software",
   "access_right": "open",
 
