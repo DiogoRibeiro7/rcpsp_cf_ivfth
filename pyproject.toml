@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rcpsp-cf-ivfth"
+version = "1.0.1"
+description = "Bi-objective RCPSP with cash-flow constraints under fuzzy uncertainty"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Diogo Ribeiro", email = "dfr@esmad.ipp.pt"}
+]
+keywords = [
+    "project-scheduling",
+    "rcpsp",
+    "fuzzy-optimization",
+    "milp",
+    "operations-research",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "pyomo>=6",
+]
+
+[project.optional-dependencies]
+visualization = [
+    "matplotlib>=3.5",
+]
+docs = [
+    "beautifulsoup4>=4.12",
+    "markdownify>=0.11",
+    "pdoc>=14",
+]
+test = [
+    "pytest>=7",
+    "pytest-cov>=4",
+]
+
+[project.urls]
+Homepage = "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
+Repository = "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
+Issues = "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth/issues"
+Documentation = "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth/tree/main/docs"
+
+[tool.setuptools.packages.find]
+include = ["rcpsp_cf_ivfth*"]
