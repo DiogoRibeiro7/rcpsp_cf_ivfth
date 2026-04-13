@@ -40,7 +40,7 @@ visualization = [
 ]
 docs = [
     "beautifulsoup4>=4.12",
-    "markdownify>=0.11",
+    "markdownify>=1.2.2",
     "pdoc>=14",
 ]
 test = [
