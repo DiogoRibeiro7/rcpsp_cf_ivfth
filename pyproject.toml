@@ -31,7 +31,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 dependencies = [
-    "pyomo >=6.10.0,<7.0.0",
+    "pyomo >=6.10.1,<7.0.0",
 ]
 
 [project.optional-dependencies]
