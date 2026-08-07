@@ -37,7 +37,7 @@ dependencies = [
 
 [project.optional-dependencies]
 visualization = [
-    "matplotlib>=3.5",
+    "matplotlib>=3.9.4",
 ]
 # rcpsp_cf_ivfth.sensitivity returns pandas DataFrames and plots them.
 sensitivity = [
