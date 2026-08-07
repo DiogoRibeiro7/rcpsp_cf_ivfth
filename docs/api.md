@@ -4,7 +4,8 @@
 
 # rcpsp\_cf\_ivfth
 
-RCPSP-CF-IVFTH: Bi-objective Resource-Constrained Project Scheduling with Cash-Flow under fuzzy uncertainty.
+RCPSP-CF-IVFTH: Bi-objective Resource-Constrained Project Scheduling with
+Cash-Flow under fuzzy uncertainty.
 
 This package implements the model from:
 "A New Bi-Objective Model for Resource-Constrained Project Scheduling and Cash Flow Problems
@@ -75,7 +76,8 @@ Per renewable resource k, uncertain daily use NIVTF.
 nonrenewables : Dict[int, NIVTF]
 Per non-renewable resource l, uncertain daily use NIVTF.
 payment : float
-Payment amount PA\_{i,m} devoted to the period where the activity completes (or next if delayed).
+Payment amount PA\_{i,m} devoted to the period where the activity
+completes (or the next one if delayed).
 
 ModeData( duration: [NIVTF](#NIVTF), renewables: Dict[int, [NIVTF](#NIVTF)], nonrenewables: Dict[int, [NIVTF](#NIVTF)], payment: float)
 
@@ -97,13 +99,13 @@ Financial parameters for the model.
 ## Attributes
 
 alpha\_excess\_cash : float
-Interest on excess cash (per 30-day period), used as (1+alpha)^30 in model equation.
+Daily interest rate on excess cash, applied as `(1+alpha)**30` per period.
 beta\_delayed\_pay : float
-Interest applied to delayed payments (per 30-day period).
+Daily interest rate on delayed payments, applied as `(1+beta)**30`.
 gamma\_LTL : float
-Long-term loan interest (per 30-day period).
+Daily interest rate on the long-term loan, applied as `LTL/(1+gamma)**30`.
 delta\_STL : float
-Short-term loan interest (per 30-day period).
+Daily interest rate on short-term loans, applied as `STL/(1+delta)**30`.
 IC : float
 Initial capital (received at period 1).
 max\_LTL : float
@@ -118,6 +120,14 @@ CR\_k : Dict[int, float]
 Cost per unit of renewable resource k per day.
 CW\_l : Dict[int, float]
 Cost per unit of non-renewable resource l per day.
+
+## Notes
+
+All four rates are *daily* rates compounded over a 30-day accounting period, per
+equations (1)-(4) of the paper. Note that the two loan terms enter the cash-flow
+recurrence as divisions, `LTL/(1+gamma)**30` and `STL/(1+delta)**30`, so a
+higher rate reduces the amount deducted. That is the published formulation; see
+the model notes in the README before changing it.
 
 FinanceParams( alpha\_excess\_cash: float, beta\_delayed\_pay: float, gamma\_LTL: float, delta\_STL: float, IC: float, max\_LTL: float, max\_STL: float, min\_CF: float, CC\_daily\_cap: float, CR\_k: Dict[int, float], CW\_l: Dict[int, float])
 
@@ -160,13 +170,64 @@ TY\_y = [a\_y, b\_y], with y in {1,...,Yn}. Constraint (19) sums BU\_t over t in
 
 ## Notes
 
-* The model uses days (t) and periods (y). You must set T\_days and the period intervals coherently.
+* The model uses days (t) and periods (y). You must set T\_days and the period
+  intervals coherently.
 
 CalendarParams(T\_days: int, Y\_periods: List[Tuple[int, int]])
 
 T\_days: int
 
 Y\_periods: List[Tuple[int, int]]
+
+@dataclass
+
+class
+ResourceParams:
+
+Availability limits for renewable and non-renewable resources.
+
+## Attributes
+
+renewable\_capacity : Dict[int, float]
+Per renewable resource k, the amount available \*on each day\*. A resource
+omitted from the mapping is treated as unlimited.
+nonrenewable\_capacity : Dict[int, float]
+Per non-renewable resource l, the amount available *in total across the whole
+horizon*. A resource omitted from the mapping is treated as unlimited.
+
+## Notes
+
+This is an **extension beyond the published model**. The paper has no resource
+availability parameter: `BR_kt` and `WR_lt` are free variables and resource
+use is limited only indirectly, through the maximum daily resource cost `CC`
+(constraint (12)). Supplying explicit capacities lets you model a hard resource
+ceiling instead.
+
+Passing `resources=None` to :class:`~rcpsp_cf_ivfth.model.RCPSP_CF_IVFTH` is
+the default and reproduces the paper's formulation exactly.
+
+## Examples
+
+```
+>>> ResourceParams(renewable_capacity={1: 6.0, 2: 3.0}, nonrenewable_capacity={1: 40.0})
+ResourceParams(renewable_capacity={1: 6.0, 2: 3.0}, nonrenewable_capacity={1: 40.0})
+```
+
+ResourceParams( renewable\_capacity: Dict[int, float] = <factory>, nonrenewable\_capacity: Dict[int, float] = <factory>)
+
+renewable\_capacity: Dict[int, float]
+
+nonrenewable\_capacity: Dict[int, float]
+
+def
+renewable\_limit(self, resource\_id: int) -> Optional[float]:
+
+Return the daily limit for renewable `resource_id`, or None if unlimited.
+
+def
+nonrenewable\_limit(self, resource\_id: int) -> Optional[float]:
+
+Return the horizon-wide limit for non-renewable `resource_id`, or None.
 
 @dataclass
 
@@ -191,7 +252,8 @@ Negative ideal solution for Z2 (worst cash-flow bound).
 ## Notes
 
 These targets can be computed by separate runs (min Z1, max Z2) or set by domain knowledge.
-The membership functions `mu1` and `mu2` are linear in `Z1` and `Z2` using these PiS/NiS anchors.
+The membership functions `mu1` and `mu2` are linear in `Z1` and `Z2`
+using these PiS/NiS anchors.
 
 IVFTHTargets( alpha\_level: float, Z1\_PIS: float, Z1\_NIS: float, Z2\_PIS: float, Z2\_NIS: float)
 
@@ -220,7 +282,8 @@ theta2 : float
 Weight for objective 2 membership (final cash-flow).
 gamma\_tradeoff : float
 Trade-off parameter in [0, 1].
-Objective: maximize `gamma_tradeoff * zeta + (1 - gamma_tradeoff) * (theta1 * mu1 + theta2 * mu2)`.
+Objective: maximize
+`gamma_tradeoff * zeta + (1 - gamma_tradeoff) * (theta1*mu1 + theta2*mu2)`.
 
 ## Notes
 
@@ -245,7 +308,8 @@ This stores the **lower** and **upper** triangular fuzzy numbers.
 For a triangular fuzzy number (a\_o, a\_m, a\_p) we follow the paper's normalization:
 
 * normalized => peak membership = 1 at a\_m
-* For NIVTF: lower triangle L = (a\_o^L, a\_m^L, a\_p^L) and upper triangle U = (a\_o^U, a\_m^U, a\_p^U)
+* For NIVTF: lower triangle L = (a\_o^L, a\_m^L, a\_p^L) and upper triangle
+  U = (a\_o^U, a\_m^U, a\_p^U)
   with a\_m^L = a\_m^U and a\_o^U < a\_o^L < a\_m^L(=a\_m^U) < a\_p^L < a\_p^U.
 
 In the paper:
@@ -324,3 +388,68 @@ NIVTF args: (ao\_L, am\_L, ap\_L, ao\_U, am\_U, ap\_U)
 >>> args = create_triangle(5, 7, 9, widen=0.5)
 >>> nivtf = NIVTF(*args)
 ```
+
+def
+create\_gantt\_chart(solution: Dict[str, Any], \*, ax=None, show: bool = True) -> Any:
+
+Plot a simple Gantt chart for the activity schedule.
+
+def
+plot\_resource\_usage( solution: Dict[str, Any], \*, resource\_type: str = 'renewable', ax=None, show: bool = True) -> Any:
+
+Plot resource usage over the planning horizon.
+
+def
+plot\_cash\_flow(solution: Dict[str, Any], \*, ax=None, show: bool = True) -> Any:
+
+Plot the cash flow trajectory across accounting periods.
+
+def
+plot\_loan\_usage(solution: Dict[str, Any], \*, ax=None, show: bool = True) -> Any:
+
+Plot STL/LTL loan usage across periods.
+
+def
+export\_solution\_json( solution: Dict[str, Any], path: pathlib.\_local.Path | str) -> pathlib.\_local.Path:
+
+Export the solution dictionary to a JSON file.
+
+def
+export\_solution\_csv( solution: Dict[str, Any], base\_path: pathlib.\_local.Path | str) -> Tuple[pathlib.\_local.Path, pathlib.\_local.Path, pathlib.\_local.Path]:
+
+Export solution components to CSV files.
+
+## Returns
+
+Tuple[Path, Path, Path]
+Paths to the generated schedule, resources, and finance CSV files.
+
+def
+run\_alpha\_sweep( ivfth: \_\_main\_\_.RCPSP\_CF\_IVFTH, targets: [IVFTHTargets](#IVFTHTargets), weights: [IVFTHWeights](#IVFTHWeights), alpha\_levels: Sequence[float] = (0.1, 0.3, 0.5, 0.7, 0.9), \*, solver\_name: str = 'cbc', solver\_kwargs: Optional[Dict[str, Any]] = None) -> pandas.core.frame.DataFrame:
+
+Evaluate the model across multiple alpha levels.
+
+def
+run\_weight\_scenarios( ivfth: \_\_main\_\_.RCPSP\_CF\_IVFTH, targets: [IVFTHTargets](#IVFTHTargets), weight\_configs: Iterable[Tuple[float, float, float]], \*, solver\_name: str = 'cbc', solver\_kwargs: Optional[Dict[str, Any]] = None) -> pandas.core.frame.DataFrame:
+
+Evaluate the model across a grid of (theta1, theta2, gamma) configurations.
+
+def
+run\_finance\_scenarios( ivfth: \_\_main\_\_.RCPSP\_CF\_IVFTH, targets: [IVFTHTargets](#IVFTHTargets), weights: [IVFTHWeights](#IVFTHWeights), scenarios: Iterable[Tuple[str, Dict[str, float]]], \*, solver\_name: str = 'cbc', solver\_kwargs: Optional[Dict[str, Any]] = None) -> pandas.core.frame.DataFrame:
+
+Evaluate the model with modified finance parameters.
+
+## Parameters
+
+scenarios:
+Iterable of (label, overrides) where overrides is a mapping of attribute -> new value.
+
+def
+sensitivity\_analysis( ivfth: \_\_main\_\_.RCPSP\_CF\_IVFTH, targets: [IVFTHTargets](#IVFTHTargets), weights: [IVFTHWeights](#IVFTHWeights), \*, alpha\_levels: Optional[Sequence[float]] = None, weight\_configs: Optional[Iterable[Tuple[float, float, float]]] = None, finance\_scenarios: Optional[Iterable[Tuple[str, Dict[str, float]]]] = None, solver\_name: str = 'cbc', solver\_kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, pandas.core.frame.DataFrame]:
+
+Run a bundle of sensitivity analyses and return results per scenario family.
+
+def
+plot\_metric\_trends( df: pandas.core.frame.DataFrame, x\_column: str, \*, metrics: Sequence[str] = ('Cmax', 'CF\_final'), ax=None, show: bool = True) -> Any:
+
+Plot selected metrics against a given column (e.g., alpha levels or scenario index).

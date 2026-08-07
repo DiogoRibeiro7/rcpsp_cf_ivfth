@@ -1,26 +1,33 @@
 """
 Main MILP model for Bi-Objective Multi-Mode RCPSP with Cash-Flow under Uncertainty.
 
-This module contains the RCPSP_CF_IVFTH class that builds and solves the 
+This module contains the RCPSP_CF_IVFTH class that builds and solves the
 Extended IVF-TH scalarization model using Pyomo.
 """
 
 from __future__ import annotations
-from typing import Dict, List, Tuple, Optional, Any, Union
-
-from collections import deque
 
 import logging
+import math
 from time import perf_counter
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Pyomo is used for the MILP
-from pyomo.environ import (
-    ConcreteModel, Set as PySet, Var, Param, NonNegativeReals, Binary, Integers,
-    Objective, Constraint, SolverFactory, value, maximize, Reals
-)
+from pyomo.environ import Binary, ConcreteModel, Constraint
 from pyomo.environ import ConstraintList as _ConstraintList
+from pyomo.environ import Integers, NonNegativeReals, Objective, Param, Reals
+from pyomo.environ import Set as PySet
+from pyomo.environ import SolverFactory, Var, maximize, value
 
-from .data import Activity, FinanceParams, CalendarParams, IVFTHTargets, IVFTHWeights
+from .data import (
+    Activity,
+    CalendarParams,
+    FinanceParams,
+    IVFTHTargets,
+    IVFTHWeights,
+    ModeData,
+    ResourceParams,
+)
 from .fuzzy import NIVTF, create_triangle
 
 
@@ -31,10 +38,10 @@ class RCPSP_CF_IVFTH:
     This class implements the full model from:
     "A New Bi-Objective Model for Resource-Constrained Project Scheduling and Cash Flow Problems
     with Financial Constraints under Uncertainty: A Case Study"
-    
+
     Features:
     - Activities with multiple modes
-    - Renewable and non-renewable resources
+    - Renewable and non-renewable resources, with optional availability limits
     - Daily and periodic costs
     - Initial capital, short/long-term loans, interest on excess cash, delayed payments
     - Payments can be delayed at most 1 period
@@ -46,10 +53,16 @@ class RCPSP_CF_IVFTH:
 
     Usage:
         acts, finance, calendar = build_toy_instance()
-        ivfth = RCPSP_CF_IVFTH(acts, finance, calendar)
+        resources = ResourceParams(
+            renewable_capacity={1: 6.0, 2: 3.0},
+            nonrenewable_capacity={1: 40.0},
+        )
+        ivfth = RCPSP_CF_IVFTH(acts, finance, calendar, resources)
 
         # Set IVF-TH targets and weights (you can pre-run to compute PiS/NiS or set bounds)
-        targets = IVFTHTargets(alpha_level=0.5, Z1_PIS=10.0, Z1_NIS=60.0, Z2_PIS=30000.0, Z2_NIS=0.0)
+        targets = IVFTHTargets(
+            alpha_level=0.5, Z1_PIS=10.0, Z1_NIS=60.0, Z2_PIS=30000.0, Z2_NIS=0.0
+        )
         weights = IVFTHWeights(theta1=0.5, theta2=0.5, gamma_tradeoff=0.5)
 
         model = ivfth.build_model(targets, weights)
@@ -63,6 +76,7 @@ class RCPSP_CF_IVFTH:
         activities: Dict[str, Activity],
         finance: FinanceParams,
         calendar: CalendarParams,
+        resources: Optional[ResourceParams] = None,
         *,
         logging_enabled: bool = False,
         log_level: Union[int, str] = "INFO",
@@ -72,6 +86,7 @@ class RCPSP_CF_IVFTH:
         self.activities = activities
         self.finance = finance
         self.calendar = calendar
+        self.resources = resources
         self._strict_validation = strict_validation
 
         self._logger = self._configure_logger(logging_enabled, log_level, log_file)
@@ -173,6 +188,23 @@ class RCPSP_CF_IVFTH:
         self._log(logging.WARNING, message, **fields)
 
     @staticmethod
+    def _coerce_number(raw: Any) -> Optional[float]:
+        """
+        Convert a solver-reported figure to a plain float.
+
+        Solvers that do not report a value hand back Pyomo's ``UndefinedData``
+        sentinel, which is not JSON-serializable and would break
+        :func:`~rcpsp_cf_ivfth.visualization.export_solution_json` once the solver
+        metadata is attached to a solution.
+        """
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _component_size(component: Any) -> Optional[int]:
         try:
             return len(component)
@@ -186,9 +218,7 @@ class RCPSP_CF_IVFTH:
     def _model_statistics(model: ConcreteModel) -> Dict[str, int]:
         stats: Dict[str, int] = {}
         try:
-            stats["variables"] = sum(
-                1 for _ in model.component_data_objects(Var, active=True)
-            )
+            stats["variables"] = sum(1 for _ in model.component_data_objects(Var, active=True))
         except Exception:
             pass
         try:
@@ -203,7 +233,9 @@ class RCPSP_CF_IVFTH:
     def _validate_inputs(self) -> None:
         strict = getattr(self, "_strict_validation", False)
 
-        def warn_or_raise(code: str, message: str, suggestion: Optional[str] = None, **fields: Any) -> None:
+        def warn_or_raise(
+            code: str, message: str, suggestion: Optional[str] = None, **fields: Any
+        ) -> None:
             payload = dict(fields)
             if suggestion:
                 payload["suggestion"] = suggestion
@@ -221,7 +253,10 @@ class RCPSP_CF_IVFTH:
                 has_start="Start" in self.activities,
                 has_end="End" in self.activities,
             )
-            raise ValueError("Activities must include 'Start' and 'End'. Add terminal nodes to the instance definition.")
+            raise ValueError(
+                "Activities must include 'Start' and 'End'. "
+                "Add terminal nodes to the instance definition."
+            )
 
         # Every predecessor must be a known activity
         act_names = set(self.activities.keys())
@@ -251,7 +286,8 @@ class RCPSP_CF_IVFTH:
                 max_period_end=max_day_cover,
             )
             raise ValueError(
-                f"T_days must cover all Y_periods upper bounds (max {max_day_cover}); current T_days={self.calendar.T_days}. "
+                f"T_days must cover all Y_periods upper bounds (max {max_day_cover}); "
+                f"current T_days={self.calendar.T_days}. "
                 "Increase the planning horizon or adjust the period definitions."
             )
 
@@ -277,11 +313,14 @@ class RCPSP_CF_IVFTH:
 
     # ---------- Helper: fuzzy crisp reductions ----------
     @staticmethod
-    def _duration_alpha_L(nivtf: NIVTF, alpha: float, use_lower: bool = True) -> Tuple[float, float]:
+    def _duration_alpha_L(
+        nivtf: NIVTF, alpha: float, use_lower: bool = True
+    ) -> Tuple[float, float]:
         """
         Return alpha-weighted expected duration components E1_L and E2_L:
             lower:    alpha*E2_L + (1-alpha)*E1_L    (used in precedence lower bound)
-            upper:    (1-alpha/2)*E2_L + (alpha/2)*E1_L or (alpha/2)*E2_L + (1-alpha/2)*E1_L (per paper's (33),(34))
+            upper:    (1-alpha/2)*E2_L + (alpha/2)*E1_L
+                      or (alpha/2)*E2_L + (1-alpha/2)*E1_L   (per paper's (33),(34))
         This helper focuses on the LOWER side used in constraints (30), (33), (34).
 
         For constraints:
@@ -318,6 +357,32 @@ class RCPSP_CF_IVFTH:
         return nivtf.EV_mid()
 
     @staticmethod
+    def _alpha_blend_duration(nivtf: NIVTF, alpha: float) -> float:
+        """
+        Crisp duration used by the precedence constraint (30):
+        ``alpha*E2_L + (1-alpha)*E1_L``.
+        """
+        return alpha * nivtf.E2_L() + (1.0 - alpha) * nivtf.E1_L()
+
+    @staticmethod
+    def _resource_span_days(nivtf: NIVTF) -> int:
+        """
+        Number of whole days an activity occupies on the resource profile.
+
+        Constraints (31) and (32) size the resource window with the *expected value*
+        ``(d_o + 2*d_m + d_p) / 4`` of the lower triangle, not with the alpha blend
+        that constraint (30) uses for precedence. The two therefore differ, which is
+        the paper's choice rather than an inconsistency here.
+
+        Zero-duration milestones (``Start``/``End``) return 0 and never appear on the
+        resource profile.
+        """
+        span = nivtf.EV_L()
+        if span <= 0.0:
+            return 0
+        return max(1, int(math.ceil(span - 1e-9)))
+
+    @staticmethod
     def _nivtf_values(nivtf: NIVTF) -> Tuple[float, float, float, float, float, float]:
         return (
             nivtf.ao_L,
@@ -343,41 +408,47 @@ class RCPSP_CF_IVFTH:
                 if predecessor in graph:
                     graph[predecessor].append(successor)
 
+        # Iterative DFS: a recursive walk overflows the stack on long activity chains.
         visited: Dict[str, str] = {}
-        stack: Dict[str, bool] = {}
+        on_stack: Dict[str, bool] = {}
         parent: Dict[str, Optional[str]] = {}
-        cycle: Optional[List[str]] = None
 
-        def dfs(node: str) -> None:
-            nonlocal cycle
-            visited[node] = "gray"
-            stack[node] = True
-            for neighbor in graph.get(node, []):
-                if neighbor not in visited:
-                    parent[neighbor] = node
-                    dfs(neighbor)
-                    if cycle:
-                        return
-                elif stack.get(neighbor):
-                    path = [neighbor]
-                    current = node
-                    while current is not None and current != neighbor:
-                        path.append(current)
-                        current = parent.get(current)
-                    path.append(neighbor)
-                    path.reverse()
-                    cycle = path
-                    return
-            stack[node] = False
-            visited[node] = "black"
+        def build_cycle(back_edge_target: str, from_node: str) -> List[str]:
+            path = [back_edge_target]
+            current: Optional[str] = from_node
+            while current is not None and current != back_edge_target:
+                path.append(current)
+                current = parent.get(current)
+            path.append(back_edge_target)
+            path.reverse()
+            return path
 
-        for node in graph:
-            if node not in visited:
-                parent[node] = None
-                dfs(node)
-                if cycle:
-                    break
-        return cycle
+        for root in graph:
+            if root in visited:
+                continue
+            parent[root] = None
+            # Each frame is (node, iterator over its remaining successors).
+            stack: List[Tuple[str, Any]] = [(root, iter(graph[root]))]
+            visited[root] = "gray"
+            on_stack[root] = True
+            while stack:
+                node, neighbors = stack[-1]
+                advanced = False
+                for neighbor in neighbors:
+                    if neighbor not in visited:
+                        parent[neighbor] = node
+                        visited[neighbor] = "gray"
+                        on_stack[neighbor] = True
+                        stack.append((neighbor, iter(graph.get(neighbor, []))))
+                        advanced = True
+                        break
+                    if on_stack.get(neighbor):
+                        return build_cycle(neighbor, node)
+                if not advanced:
+                    on_stack[node] = False
+                    visited[node] = "black"
+                    stack.pop()
+        return None
 
     def _validate_nivtf_values(self) -> None:
         tolerance = -1e-6
@@ -392,7 +463,8 @@ class RCPSP_CF_IVFTH:
                         min_value=duration_min,
                     )
                     raise ValueError(
-                        f"Activity '{act_name}' mode {mode_id} has a negative duration bound ({duration_min}). "
+                        f"Activity '{act_name}' mode {mode_id} has a negative "
+                        f"duration bound ({duration_min}). "
                         "Adjust the NIVTF parameters to be non-negative."
                     )
                 elif duration_min < 0:
@@ -414,7 +486,8 @@ class RCPSP_CF_IVFTH:
                         )
                         raise ValueError(
                             f"Renewable resource {res_id} for activity '{act_name}' mode {mode_id} "
-                            f"has negative demand ({res_min}). Ensure resource demands are non-negative."
+                            f"has negative demand ({res_min}). "
+                            "Ensure resource demands are non-negative."
                         )
                     elif res_min < 0:
                         self._log_debug(
@@ -435,8 +508,10 @@ class RCPSP_CF_IVFTH:
                             min_value=res_min,
                         )
                         raise ValueError(
-                            f"Non-renewable resource {res_id} for activity '{act_name}' mode {mode_id} "
-                            f"has negative demand ({res_min}). Ensure resource demands are non-negative."
+                            f"Non-renewable resource {res_id} for activity "
+                            f"'{act_name}' mode {mode_id} "
+                            f"has negative demand ({res_min}). "
+                            "Ensure resource demands are non-negative."
                         )
                     elif res_min < 0:
                         self._log_debug(
@@ -474,11 +549,7 @@ class RCPSP_CF_IVFTH:
 
     def _available_funds(self) -> float:
         periods = len(self.calendar.Y_periods)
-        return (
-            self.finance.IC
-            + self.finance.max_LTL
-            + periods * self.finance.max_STL
-        )
+        return self.finance.IC + self.finance.max_LTL + periods * self.finance.max_STL
 
     def _validate_resource_caps(self, warn_or_raise) -> None:
         cap = self.finance.CC_daily_cap
@@ -496,9 +567,12 @@ class RCPSP_CF_IVFTH:
             act, mode_id, estimated_cost = max(problematic, key=lambda item: item[2])
             warn_or_raise(
                 "validation_resource_cost_cap",
-                f"Estimated daily resource cost {estimated_cost:.2f} exceeds CC_daily_cap ({cap:.2f}) "
+                f"Estimated daily resource cost {estimated_cost:.2f} exceeds "
+                f"CC_daily_cap ({cap:.2f}) "
                 f"for activity '{act}' mode {mode_id}.",
-                suggestion="Increase FinanceParams.CC_daily_cap or reduce resource usage for that mode.",
+                suggestion=(
+                    "Increase FinanceParams.CC_daily_cap or reduce resource usage " "for that mode."
+                ),
                 activity=act,
                 mode=mode_id,
                 estimated_cost=round(estimated_cost, 4),
@@ -511,7 +585,8 @@ class RCPSP_CF_IVFTH:
         if minimum_required > available + 1e-6:
             warn_or_raise(
                 "validation_finance_shortfall",
-                f"Estimated minimum resource spending ({minimum_required:.2f}) exceeds available funds ({available:.2f}).",
+                f"Estimated minimum resource spending ({minimum_required:.2f}) "
+                f"exceeds available funds ({available:.2f}).",
                 suggestion="Increase initial capital or loan limits, or reduce resource demands.",
                 estimated_cost=round(minimum_required, 4),
                 available_funds=available,
@@ -540,14 +615,18 @@ class RCPSP_CF_IVFTH:
             if prev_end is not None:
                 if start <= prev_end:
                     raise ValueError(
-                        f"Periods {idx-1} ({prev_start}, {prev_end}) and {idx} ({start}, {end}) overlap. "
+                        f"Periods {idx-1} ({prev_start}, {prev_end}) and "
+                        f"{idx} ({start}, {end}) overlap. "
                         "Adjust Y_periods to eliminate overlap."
                     )
                 if start != prev_end + 1:
                     warn_or_raise(
                         "validation_periods_not_contiguous",
-                        f"Period {idx} starts at day {start} but previous period ended at day {prev_end}.",
-                        suggestion="Ensure Y_periods are contiguous (next start = previous end + 1).",
+                        f"Period {idx} starts at day {start} but the previous "
+                        f"period ended at day {prev_end}.",
+                        suggestion=(
+                            "Ensure Y_periods are contiguous " "(next start = previous end + 1)."
+                        ),
                         previous_end=prev_end,
                         next_start=start,
                     )
@@ -625,7 +704,7 @@ class RCPSP_CF_IVFTH:
         )
 
         # Basic index sets
-        I = list(acts.keys())
+        I = list(acts.keys())  # noqa: E741 - matches the paper's index notation
         M_i = {i: list(acts[i].modes.keys()) for i in I}
         T = list(range(1, calendar.T_days + 1))
         Y = list(range(1, len(calendar.Y_periods) + 1))
@@ -641,7 +720,7 @@ class RCPSP_CF_IVFTH:
         m = ConcreteModel()
 
         # Sets
-        m.I = PySet(initialize=I, ordered=True)
+        m.I = PySet(initialize=I, ordered=True)  # noqa: E741
         m.T = PySet(initialize=T, ordered=True)
         m.Y = PySet(initialize=Y, ordered=True)
         m.K = PySet(initialize=K, ordered=True)
@@ -666,7 +745,9 @@ class RCPSP_CF_IVFTH:
         # Start / complete variables
         m.X = Var(((i, m_, t) for i in I for m_ in M_i[i] for t in T), within=Binary)
         m.Xp = Var(((i, m_, t) for i in I for m_ in M_i[i] for t in T), within=Binary)
-        m.XYp = Var(((i, m_, y, t) for i in I for m_ in M_i[i] for y in Y for t in T), within=Binary)
+        m.XYp = Var(
+            ((i, m_, y, t) for i in I for m_ in M_i[i] for y in Y for t in T), within=Binary
+        )
 
         # Resources and costs
         m.BR = Var(((k, t) for k in K for t in T), within=NonNegativeReals)
@@ -740,7 +821,9 @@ class RCPSP_CF_IVFTH:
         for i in I:
             for mm in M_i[i]:
                 PA_im[(i, mm)] = acts[i].modes[mm].payment
-        m.PA_im = Param(((i, mm) for i in I for mm in M_i[i]), initialize=PA_im, within=Reals, default=0.0)
+        m.PA_im = Param(
+            ((i, mm) for i in I for mm in M_i[i]), initialize=PA_im, within=Reals, default=0.0
+        )
 
         # alpha-level for fuzzy crisping
         m.alpha = Param(initialize=alpha, within=Reals)
@@ -753,6 +836,7 @@ class RCPSP_CF_IVFTH:
             # Completion time of End activity: sum t * Xp[End, m, t] equals Cmax
             # But End has single mode in our setup. More generally, we can bind:
             return _m.Cmax == sum(t * _m.Xp[("End", mm, t)] for mm in M_i["End"] for t in T)
+
         m.Cmax_def = Constraint(rule=cmax_def_rule)
 
         # Z2 = CF at final period Yn
@@ -764,6 +848,7 @@ class RCPSP_CF_IVFTH:
         # (7) Each activity starts exactly once in one mode and one day
         def start_once_rule(_m, i):
             return sum(_m.X[(i, mm, t)] for mm in M_i[i] for t in T) == 1
+
         m.start_once = Constraint(m.I, rule=start_once_rule)
         self._log_debug("constraint_start_once_defined", count=len(m.start_once))
 
@@ -775,60 +860,124 @@ class RCPSP_CF_IVFTH:
             rhs_expr = 0.0
             for mmi in M_i[i]:
                 # alpha-blended expected duration LOWER side:
-                E1L, E2L = self._duration_alpha_L(acts[i].modes[mmi].duration, alpha=_m.alpha.value, use_lower=True)
+                E1L, E2L = self._duration_alpha_L(
+                    acts[i].modes[mmi].duration, alpha=_m.alpha.value, use_lower=True
+                )
                 dur_alpha = _m.alpha * E2L + (1.0 - _m.alpha) * E1L
                 rhs_expr += sum((t + dur_alpha) * _m.X[(i, mmi, t)] for t in T)
             return lhs >= rhs_expr
+
         m.precedence = Constraint(m.P, rule=lambda _m, i, j: precedence_rule(_m, i, j))
         self._log_debug("constraint_precedence_defined", arcs=len(P_edges))
 
-        # (9) Renewable resources per day: sum over active activities at day t of r_i,k * X_i(h) <= BR[k,t]
-        # Active if started at h and running h..(h+dur-1). We approximate with expected length at alpha-level:
-        # We linearize by upper-bounding daily need using the alpha-blend per (31) with window average.
-        # Exact convolution is combinatorial; the paper uses a similar linearization window.
+        # Per (activity, mode): the resource-window span in whole days, and the
+        # alpha-blended daily demand per resource, both per constraints (31)-(32).
+        # Precomputing keeps the rules linear in the horizon rather than quadratic.
+        zero_nivtf = NIVTF(*create_triangle(0, 0, 0))
+        span_im: Dict[Tuple[str, int], int] = {}
+        renew_rate: Dict[Tuple[str, int, int], float] = {}
+        nonrenew_rate: Dict[Tuple[str, int, int], float] = {}
+        for i in I:
+            for mm in M_i[i]:
+                mode = acts[i].modes[mm]
+                span_im[(i, mm)] = self._resource_span_days(mode.duration)
+                for k in K:
+                    renew_rate[(i, mm, k)] = self._res_use_alpha_L(
+                        mode.renewables.get(k, zero_nivtf), alpha=alpha
+                    )
+                for l_ in L:
+                    nonrenew_rate[(i, mm, l_)] = self._res_use_alpha_L(
+                        mode.nonrenewables.get(l_, zero_nivtf), alpha=alpha
+                    )
+
+        def _active_starts(i: str, mm: int, t: int) -> List[int]:
+            """Start days h for which (i, mm) is still running on day t."""
+            span = span_im[(i, mm)]
+            if span <= 0:
+                return []
+            first = max(1, t - span + 1)
+            return list(range(first, t + 1))
+
+        # (9)/(31) Renewable demand on day t: only activities whose span *covers* t
+        # consume. An activity started at h occupies days h .. h+span-1 and is released
+        # afterwards, so the profile rises and falls with the schedule.
+        #
+        # The paper prints the window as h = t .. t+span-1, which would have an activity
+        # consuming resources on days *before* it starts. Read literally that cannot be
+        # right, so the window is implemented as h = t-span+1 .. t, the transposition
+        # that makes BR[k,t] the demand actually in place on day t.
         def renewable_rule(_m, k, t):
-            rhs = _m.BR[(k, t)]
-            # Sum_{i,m} Sum_{h} r_i,k(alpha-blend) * X[i,m,h] if activity spans t
-            # Use expected span length for indexing window: we conservatively include starts h<=t
-            lhs_terms = []
-            for i in I:
-                for mm in M_i[i]:
-                    r_day = self._res_use_alpha_L(acts[i].modes[mm].renewables.get(k, NIVTF(*create_triangle(0, 0, 0))), alpha=_m.alpha.value)
-                    E1L, E2L = self._duration_alpha_L(acts[i].modes[mm].duration, alpha=_m.alpha.value, use_lower=True)
-                    dur_mid = (E1L + E2L)  # rough span proxy; safer upper approx
-                    # Include start day h if t is within [h, h+ceil(dur_mid)-1]
-                    # Implement via big window sum with on/off indicator X[i,mm,h] times r_day
-                    # (linear over h)
-                    for h in T:
-                        if h <= t:
-                            lhs_terms.append(r_day * _m.X[(i, mm, h)])
-            return sum(lhs_terms) <= rhs
+            terms = [
+                renew_rate[(i, mm, k)] * _m.X[(i, mm, h)]
+                for i in I
+                for mm in M_i[i]
+                if renew_rate[(i, mm, k)] != 0.0
+                for h in _active_starts(i, mm, t)
+            ]
+            if not terms:
+                return Constraint.Skip
+            return sum(terms) <= _m.BR[(k, t)]
+
         m.renewable = Constraint(m.K, m.T, rule=renewable_rule)
         self._log_debug(
-            "constraint_renewable_capacity_defined",
+            "constraint_renewable_demand_defined",
             count=len(m.renewable),
         )
 
-        # (10) Non-renewable per day (same style as renewables)
+        # (10) Non-renewable demand on day t (same active-window logic)
         def nonrenewable_rule(_m, l_, t):
-            rhs = _m.WR[(l_, t)]
-            lhs_terms = []
-            for i in I:
-                for mm in M_i[i]:
-                    r_day = self._res_use_alpha_L(acts[i].modes[mm].nonrenewables.get(l_, NIVTF(*create_triangle(0, 0, 0))), alpha=_m.alpha.value)
-                    for h in T:
-                        if h <= t:
-                            lhs_terms.append(r_day * _m.X[(i, mm, h)])
-            return sum(lhs_terms) <= rhs
+            terms = [
+                nonrenew_rate[(i, mm, l_)] * _m.X[(i, mm, h)]
+                for i in I
+                for mm in M_i[i]
+                if nonrenew_rate[(i, mm, l_)] != 0.0
+                for h in _active_starts(i, mm, t)
+            ]
+            if not terms:
+                return Constraint.Skip
+            return sum(terms) <= _m.WR[(l_, t)]
+
         m.nonrenewable = Constraint(m.L, m.T, rule=nonrenewable_rule)
         self._log_debug(
-            "constraint_nonrenewable_capacity_defined",
+            "constraint_nonrenewable_demand_defined",
             count=len(m.nonrenewable),
         )
 
+        # Resource availability. Renewable capacity binds per day; non-renewable
+        # capacity is a budget consumed over the whole horizon.
+        resources = self.resources
+        if resources is not None:
+
+            def renewable_capacity_rule(_m, k, t):
+                limit = resources.renewable_limit(k)
+                if limit is None:
+                    return Constraint.Skip
+                return _m.BR[(k, t)] <= limit
+
+            m.renewable_capacity = Constraint(m.K, m.T, rule=renewable_capacity_rule)
+
+            def nonrenewable_capacity_rule(_m, l_):
+                limit = resources.nonrenewable_limit(l_)
+                if limit is None:
+                    return Constraint.Skip
+                return sum(_m.WR[(l_, t)] for t in T) <= limit
+
+            m.nonrenewable_capacity = Constraint(m.L, rule=nonrenewable_capacity_rule)
+
+            self._log_debug(
+                "constraint_resource_capacity_defined",
+                renewable=len(m.renewable_capacity),
+                nonrenewable=len(m.nonrenewable_capacity),
+            )
+
         # (11) Daily resource cost: sum_k CR_k * BR[k,t] + sum_l CW_l * WR[l,t] <= BU[t]
         def daily_cost_rule(_m, t):
-            return sum(_m.CR[k] * _m.BR[(k, t)] for k in K) + sum(_m.CW[l_] * _m.WR[(l_, t)] for l_ in L) <= _m.BU[t]
+            return (
+                sum(_m.CR[k] * _m.BR[(k, t)] for k in K)
+                + sum(_m.CW[l_] * _m.WR[(l_, t)] for l_ in L)
+                <= _m.BU[t]
+            )
+
         m.daily_cost = Constraint(m.T, rule=daily_cost_rule)
         self._log_debug("constraint_daily_cost_defined", count=len(m.daily_cost))
 
@@ -840,22 +989,39 @@ class RCPSP_CF_IVFTH:
         # (13)+(14): For each activity i,m, sum_t Xp[i,m,t] = sum_t (t + dur_alpha_alt)*X[i,m,t].
         # Paper splits into (13) definition and (14) sum Xp over all m,t == 1. We'll adapt:
         def completion_link_rule(_m, i, mm):
-            # Sum_t t * Xp[i,mm,t] in [sum (t + alpha/2 E2 + (1-alpha/2)E1) X[i,mm,t], sum (t + (1-alpha/2)E2 + alpha/2 E1) X[i,mm,t]]
-            E1L, E2L = self._duration_alpha_L(acts[i].modes[mm].duration, alpha=_m.alpha.value, use_lower=True)
-            lower = sum((t + 0.5*_m.alpha * E2L + (1.0 - 0.5*_m.alpha) * E1L) * _m.X[(i, mm, t)] for t in T)
-            upper = sum((t + (1.0 - 0.5*_m.alpha) * E2L + 0.5*_m.alpha * E1L) * _m.X[(i, mm, t)] for t in T)
+            # Sum_t t * Xp[i,mm,t] lies in
+            #   [sum (t + alpha/2 E2 + (1-alpha/2) E1) X[i,mm,t],
+            #    sum (t + (1-alpha/2) E2 + alpha/2 E1) X[i,mm,t]]
+            E1L, E2L = self._duration_alpha_L(
+                acts[i].modes[mm].duration, alpha=_m.alpha.value, use_lower=True
+            )
+            lower = sum(
+                (t + 0.5 * _m.alpha * E2L + (1.0 - 0.5 * _m.alpha) * E1L) * _m.X[(i, mm, t)]
+                for t in T
+            )
+            upper = sum(
+                (t + (1.0 - 0.5 * _m.alpha) * E2L + 0.5 * _m.alpha * E1L) * _m.X[(i, mm, t)]
+                for t in T
+            )
             left = sum(t * _m.Xp[(i, mm, t)] for t in T)
             # Two inequalities:
             return (lower <= left, left <= upper)
+
         # Pyomo doesn't allow returning tuple lists from rule easily; add two constraints per (i,mm)
         m.comp_lo = _ConstraintList()
         m.comp_hi = _ConstraintList()
         for i in I:
             for mm in M_i[i]:
                 # Build expressions now:
-                E1L, E2L = self._duration_alpha_L(acts[i].modes[mm].duration, alpha=alpha, use_lower=True)
-                lower = sum((t + 0.5*alpha * E2L + (1.0 - 0.5*alpha) * E1L) * m.X[(i, mm, t)] for t in T)
-                upper = sum((t + (1.0 - 0.5*alpha) * E2L + 0.5*alpha * E1L) * m.X[(i, mm, t)] for t in T)
+                E1L, E2L = self._duration_alpha_L(
+                    acts[i].modes[mm].duration, alpha=alpha, use_lower=True
+                )
+                lower = sum(
+                    (t + 0.5 * alpha * E2L + (1.0 - 0.5 * alpha) * E1L) * m.X[(i, mm, t)] for t in T
+                )
+                upper = sum(
+                    (t + (1.0 - 0.5 * alpha) * E2L + 0.5 * alpha * E1L) * m.X[(i, mm, t)] for t in T
+                )
                 left = sum(t * m.Xp[(i, mm, t)] for t in T)
                 m.comp_lo.add(lower <= left)
                 m.comp_hi.add(left <= upper)
@@ -868,12 +1034,17 @@ class RCPSP_CF_IVFTH:
         # (14): ensure exactly one completion (over all m,t) per activity
         def complete_once_rule(_m, i):
             return sum(_m.Xp[(i, mm, t)] for mm in M_i[i] for t in T) == 1
+
         m.complete_once = Constraint(m.I, rule=complete_once_rule)
 
         # (15)-(17): tie completion day t to period y via XYp
         def XYp_sum_rule(_m, i, mm, t):
             return sum(_m.XYp[(i, mm, y, t)] for y in Y) == _m.Xp[(i, mm, t)]
-        m.XYp_sum = Constraint(((i, mm, t) for i in I for mm in M_i[i] for t in T), rule=lambda _m, i, mm, t: XYp_sum_rule(_m, i, mm, t))
+
+        m.XYp_sum = Constraint(
+            ((i, mm, t) for i in I for mm in M_i[i] for t in T),
+            rule=lambda _m, i, mm, t: XYp_sum_rule(_m, i, mm, t),
+        )
         self._log_debug(
             "constraint_completion_period_mapping_defined",
             count=len(m.XYp_sum),
@@ -883,50 +1054,92 @@ class RCPSP_CF_IVFTH:
             # TY_{y-1} * XYp <= t * Xp   -> with TY_{y-1} meaning lower bound a_y
             ay = _m.a[y]
             return ay * _m.XYp[(i, mm, y, t)] <= t * _m.Xp[(i, mm, t)]
-        m.XYp_lb = Constraint(((i, mm, y, t) for i in I for mm in M_i[i] for y in Y for t in T), rule=XYp_lb_rule)
+
+        m.XYp_lb = Constraint(
+            ((i, mm, y, t) for i in I for mm in M_i[i] for y in Y for t in T), rule=XYp_lb_rule
+        )
 
         def XYp_ub_rule(_m, i, mm, y, t):
             by = _m.b[y]
             return t * _m.XYp[(i, mm, y, t)] <= by * _m.XYp[(i, mm, y, t)]
-        m.XYp_ub = Constraint(((i, mm, y, t) for i in I for mm in M_i[i] for y in Y for t in T), rule=XYp_ub_rule)
+
+        m.XYp_ub = Constraint(
+            ((i, mm, y, t) for i in I for mm in M_i[i] for y in Y for t in T), rule=XYp_ub_rule
+        )
         self._log_debug(
             "constraint_completion_period_bounds_defined",
             lower=len(m.XYp_lb),
             upper=len(m.XYp_ub),
         )
 
-        # (18) Delayed payment balance per period:
-        # sum_{i,m,t} PA_im * XYp[i,m,y,t] - PA[y] <= DP[y]
+        # (18) Delayed payment balance per period.
+        # Revenue earned in period y is whatever the activities completing in y are
+        # worth. Every unit of it is either collected in y (PA[y]) or deferred by one
+        # period (DP[y], collected in y+1 with interest). The balance must be an
+        # *equality*: with an inequality PA[y] has no upper bound and the model can
+        # invent arbitrary cash, which drives mu2 to 1.0 in every run and silently
+        # removes the second objective from the problem.
         def delayed_pay_rule(_m, y):
-            lhs = sum(_m.PA_im[(i, mm)] * _m.XYp[(i, mm, y, t)] for i in I for mm in M_i[i] for t in T)
-            return lhs - _m.PA[y] <= _m.DP[y]
+            earned = sum(
+                _m.PA_im[(i, mm)] * _m.XYp[(i, mm, y, t)] for i in I for mm in M_i[i] for t in T
+            )
+            return earned == _m.PA[y] + _m.DP[y]
+
         m.delayed_pay = Constraint(m.Y, rule=delayed_pay_rule)
+
+        # Nothing can be deferred past the end of the horizon: a payment pushed out of
+        # the final period would never be collected by the cash-flow recurrence.
+        m.no_deferral_past_horizon = Constraint(expr=m.DP[Y[-1]] == 0.0)
         self._log_debug("constraint_delayed_pay_defined", count=len(m.delayed_pay))
 
         # (19) TBU[y] = sum_{t in [a_y, b_y]} BU[t]
         def TBU_rule(_m, y):
             ay, by = _m.a[y], _m.b[y]
             return _m.TBU[y] == sum(_m.BU[t] for t in T if (t >= ay and t <= by))
+
         m.tbu_def = Constraint(m.Y, rule=TBU_rule)
         self._log_debug("constraint_period_cost_defined", count=len(m.tbu_def))
+
+        # (20)-(21) Cash-flow recurrence, exactly as printed in the paper.
+        #
+        # The four interest rates are *daily* rates compounded over a 30-day accounting
+        # period, per equations (1)-(4):
+        #   excess cash    CF[y-1] * (1 + alpha)^30
+        #   delayed pay    DP[y-1] * (1 + beta)^30
+        #   long-term loan LTL      / (1 + gamma)^30
+        #   short-term     STL[y-1] / (1 + delta)^30
+        #
+        # The two loan terms are *divisions*, which means a higher interest rate lowers
+        # the amount deducted from cash flow. That reads backwards economically, but it
+        # is what equations (1), (2) and (21) specify, and reproducing the published
+        # model is the point of this package. Do not "correct" it to a multiplication
+        # without also renumbering the results the paper reports.
+        ex = (1.0 + finance.alpha_excess_cash) ** 30
+        bd = (1.0 + finance.beta_delayed_pay) ** 30
+        gL = (1.0 + finance.gamma_LTL) ** 30
+        dS = (1.0 + finance.delta_STL) ** 30
 
         # (20) CF[1] = IC + STL[1] + LTL + PA[1] - TBU[1]
         def CF1_rule(_m):
             return _m.CF[1] == _m.IC + _m.STL[1] + _m.LTL + _m.PA[1] - _m.TBU[1]
+
         m.cf1 = Constraint(rule=CF1_rule)
         self._log_debug("constraint_cashflow_initial_defined", count=1)
 
-        # (21) CF[y] for y >= 2:
-        # CF[y] = STL[y] + CF[y-1]*(1+alpha)^30 + PA[y] + DP[y-1]*(1+beta)^30 - TBU[y] - LTL/(1+gamma)^30 - STL[y-1]/(1+delta)^30
+        # (21) CF[y] for y >= 2
         def CFy_rule(_m, y):
             if y == 1:
                 return Constraint.Skip
-            # interest factors (assume period=30 days)
-            ex = (1.0 + _m.alpha_ex) ** 30
-            bd = (1.0 + _m.beta_dp) ** 30
-            gL = (1.0 + _m.gamma_LTL) ** 30
-            dS = (1.0 + _m.delta_STL) ** 30
-            return _m.CF[y] == _m.STL[y] + _m.CF[y - 1] * ex + _m.PA[y] + _m.DP[y - 1] * bd - _m.TBU[y] - _m.LTL / gL - _m.STL[y - 1] / dS
+            return _m.CF[y] == (
+                _m.STL[y]
+                + _m.CF[y - 1] * ex
+                + _m.PA[y]
+                + _m.DP[y - 1] * bd
+                - _m.TBU[y]
+                - _m.LTL / gL
+                - _m.STL[y - 1] / dS
+            )
+
         m.cfy = Constraint(m.Y, rule=CFy_rule)
         self._log_debug(
             "constraint_cashflow_dynamic_defined",
@@ -962,8 +1175,10 @@ class RCPSP_CF_IVFTH:
         #   mu1 >= 0
         #   mu1 <= 1
         #   mu1 <= (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS)
-        #   mu1 >= (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS) - bigM*(binary intervals)  [we avoid binaries; use inequality in the right sense]
-        # For TH, it suffices to *upper-bound* mu1 and mu2 and then maximize a convex combination; so:
+        #   mu1 >= (Z1_NIS - Cmax) / (Z1_NIS - Z1_PIS) - bigM*(binary intervals)
+        #         [we avoid binaries and use the inequality in the right sense]
+        # For TH it suffices to *upper-bound* mu1 and mu2 and then maximize a convex
+        # combination, so:
         denom1 = max(1e-9, (Z1_NIS - Z1_PIS))
         m.mu1_le = Constraint(expr=m.mu1 <= (Z1_NIS - m.Cmax) / denom1)
 
@@ -991,7 +1206,7 @@ class RCPSP_CF_IVFTH:
 
         m.OBJ = Objective(
             expr=gamma * m.lambda_star + (1.0 - gamma) * (theta1 * m.mu1 + theta2 * m.mu2),
-            sense=maximize
+            sense=maximize,
         )
 
         stats = self._model_statistics(m)
@@ -1031,6 +1246,12 @@ class RCPSP_CF_IVFTH:
         Dict[str, Any]
             A summary with objective value, Cmax, final CF, memberships, and status.
 
+        Raises
+        ------
+        RuntimeError
+            If the solver is not installed, or if it finished without a usable
+            solution (for example an infeasible or unbounded model).
+
         Notes
         -----
         - If your environment lacks the solver, install one or switch to an available one.
@@ -1055,12 +1276,21 @@ class RCPSP_CF_IVFTH:
             except Exception:
                 pass
 
-        res = opt.solve(model, tee=tee)
+        # Defer loading the solution so an infeasible or unbounded model reports a
+        # clear status instead of failing inside Pyomo's result loader. Not every
+        # solver interface accepts the flag, so fall back to the plain call.
+        deferred_load = True
+        try:
+            res = opt.solve(model, tee=tee, load_solutions=False)
+        except (TypeError, ValueError):
+            deferred_load = False
+            res = opt.solve(model, tee=tee)
+
         termination = str(res.solver.termination_condition)
         status = str(res.solver.status)
-        solver_time = getattr(res.solver, "time", None)
+        solver_time = self._coerce_number(getattr(res.solver, "time", None))
         if solver_time is None:
-            solver_time = getattr(res.solver, "wallclock_time", None)
+            solver_time = self._coerce_number(getattr(res.solver, "wallclock_time", None))
 
         if termination.lower() != "optimal":
             self._log_warning(
@@ -1074,6 +1304,16 @@ class RCPSP_CF_IVFTH:
                 termination=termination,
                 status=status,
             )
+
+        if deferred_load:
+            if not getattr(res, "solution", None):
+                raise RuntimeError(
+                    f"Solver '{solver_name}' returned no solution "
+                    f"(termination: {termination}, status: {status}). "
+                    "The model is most likely infeasible - check resource capacities, "
+                    "the daily cost cap, and the loan limits against the horizon."
+                )
+            model.solutions.load_from(res)
 
         elapsed = round(perf_counter() - solve_start, 4)
         self._log_info(
@@ -1136,13 +1376,18 @@ class RCPSP_CF_IVFTH:
                     if key in model.Xp and value(model.Xp[key]) >= 0.5:
                         finish_day = int(best_key(tau))
                         break
+                # `finish` is the day the activity is *released*: the model lets a
+                # successor start on that same day, so the activity occupies
+                # [start, finish) and its length is finish - start. Adding one, as an
+                # inclusive day count would, over-reports every duration by a day and
+                # makes consecutive Gantt bars overlap.
                 schedule.append(
                     {
                         "activity": activity,
                         "mode": chosen_mode,
                         "start": start_day,
                         "finish": finish_day,
-                        "duration": finish_day - start_day + 1,
+                        "duration": max(0, finish_day - start_day),
                     }
                 )
         schedule.sort(key=lambda item: (item["start"], item["activity"]))
@@ -1201,4 +1446,3 @@ class RCPSP_CF_IVFTH:
             activities=len(schedule),
         )
         return solution
-
