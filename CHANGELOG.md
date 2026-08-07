@@ -92,8 +92,15 @@ Constraint numbers below refer to the paper's equations.
   in `setup.cfg`, so every setting in it — including the 80% coverage gate — had been
   silently ignored.
 - Solver-dependent tests carry the `solver` marker, so `-m "not solver"` now works.
-- CI tests Python 3.9-3.13 (was 3.8-3.11, where 3.8 contradicted `requires-python`),
-  installs HiGHS so solver-backed tests actually run, and the `lint` job passes.
+- **Minimum Python is now 3.10** (was a declared 3.9 that could not actually be
+  installed). `pyproject.toml` asked for `pyomo >=6.10.0`, but pyomo 6.10 requires
+  Python >= 3.10, so `pip install` on 3.9 failed to resolve. The old CI hid this by
+  installing bare `pyomo` and ignoring the project's own constraint. Python 3.9
+  reached end of life in October 2025.
+- CI tests Python 3.10-3.13 (was 3.8-3.11, where 3.8 contradicted `requires-python`),
+  installs the package with its real constraints via `pip install -e ".[test]"` so
+  packaging errors surface, installs HiGHS so solver-backed tests actually run, and
+  the `lint` job passes.
 - `__version__` is read from installed package metadata instead of being a second
   hand-maintained literal.
 - All references to the software DOI use `10.5281/zenodo.17382196`; `CITATION.cff`,

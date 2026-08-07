@@ -7,7 +7,7 @@ name = "rcpsp-cf-ivfth"
 version = "2.0.0"
 description = "Bi-objective RCPSP with cash-flow constraints under fuzzy uncertainty"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
     {name = "Diogo Ribeiro", email = "dfr@esmad.ipp.pt"}
@@ -25,7 +25,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -105,7 +104,7 @@ filterwarnings = [
 
 [tool.black]
 line-length = 100
-target-version = ["py39"]
+target-version = ["py310"]
 
 [tool.isort]
 profile = "black"

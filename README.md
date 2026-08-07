@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17382196.svg)](https://doi.org/10.5281/zenodo.17382196)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 Bi-objective **Resource-Constrained Project Scheduling with Cash-Flow** under **fuzzy uncertainty** (NIVTF), solved via an **extended IVF–TH** scalarization and MILP.
 
@@ -130,12 +130,12 @@ activities = {
 }
 
 # 2. Define finance parameters.
-#    All four rates are effective rates *per accounting period*.
+#    All four rates are *daily* rates, compounded over a 30-day period by the model.
 finance = FinanceParams(
-    alpha_excess_cash=0.0125,   # Earned on cash carried into the next period
-    beta_delayed_pay=0.10,      # Earned on a payment deferred by one period
-    gamma_LTL=0.06,             # Charged per period on the long-term loan
-    delta_STL=0.075,            # Charged over a short-term loan's one-period life
+    alpha_excess_cash=0.0125,   # Excess cash:     CF_{y-1} * (1+alpha)^30
+    beta_delayed_pay=0.10,      # Delayed payment: DP_{y-1} * (1+beta)^30
+    gamma_LTL=0.06,             # Long-term loan:  LTL      / (1+gamma)^30
+    delta_STL=0.075,            # Short-term loan: STL_{y-1}/ (1+delta)^30
     IC=10000.0,                 # Initial capital
     max_LTL=5000.0,             # Loan limits
     max_STL=4000.0,

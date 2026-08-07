@@ -16,7 +16,7 @@
   "license": "https://spdx.org/licenses/MIT",
   "codeRepository": "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth",
   "programmingLanguage": "Python",
-  "runtimePlatform": "Python 3.9+",
+  "runtimePlatform": "Python 3.10+",
   "version": "2.0.0",
   "dateCreated": "2025-09-11",
   "datePublished": "2025-09-11",
