@@ -50,7 +50,7 @@ solvers = [
 docs = [
     "beautifulsoup4>=4.14.3",
     "markdownify>=0.11",
-    "pdoc>=14",
+    "pdoc>=15.0.4",
 ]
 test = [
     "pytest>=8.4.2",
