@@ -7,8 +7,9 @@ fuzzy uncertainty.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Dict, List, Tuple
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 from .fuzzy import NIVTF
 
@@ -27,8 +28,10 @@ class ModeData:
     nonrenewables : Dict[int, NIVTF]
         Per non-renewable resource l, uncertain daily use NIVTF.
     payment : float
-        Payment amount PA_{i,m} devoted to the period where the activity completes (or next if delayed).
+        Payment amount PA_{i,m} devoted to the period where the activity
+        completes (or the next one if delayed).
     """
+
     duration: NIVTF
     renewables: Dict[int, NIVTF]
     nonrenewables: Dict[int, NIVTF]
@@ -39,7 +42,7 @@ class ModeData:
 class Activity:
     """
     Activity with multiple modes and precedence list.
-    
+
     Attributes
     ----------
     name : str
@@ -49,6 +52,7 @@ class Activity:
     modes : Dict[int, ModeData]
         Dictionary mapping mode index to mode data.
     """
+
     name: str
     predecessors: List[str]
     modes: Dict[int, ModeData]  # mode index -> ModeData
@@ -62,13 +66,13 @@ class FinanceParams:
     Attributes
     ----------
     alpha_excess_cash : float
-        Interest on excess cash (per 30-day period), used as (1+alpha)^30 in model equation.
+        Effective interest earned on cash carried into the next accounting period.
     beta_delayed_pay : float
-        Interest applied to delayed payments (per 30-day period).
+        Effective compensation earned on a payment deferred by one accounting period.
     gamma_LTL : float
-        Long-term loan interest (per 30-day period).
+        Effective interest charged on the long-term loan per accounting period.
     delta_STL : float
-        Short-term loan interest (per 30-day period).
+        Effective interest charged on a short-term loan over its one-period life.
     IC : float
         Initial capital (received at period 1).
     max_LTL : float
@@ -83,7 +87,15 @@ class FinanceParams:
         Cost per unit of renewable resource k per day.
     CW_l : Dict[int, float]
         Cost per unit of non-renewable resource l per day.
+
+    Notes
+    -----
+    All four interest rates are *effective rates per accounting period*, applied
+    directly (not compounded over 30 days). With the default toy values this means
+    1.25% earned on cash carried forward, 6% charged per period on the long-term
+    loan, and so on.
     """
+
     alpha_excess_cash: float
     beta_delayed_pay: float
     gamma_LTL: float
@@ -95,6 +107,56 @@ class FinanceParams:
     CC_daily_cap: float
     CR_k: Dict[int, float]
     CW_l: Dict[int, float]
+
+
+@dataclass
+class ResourceParams:
+    """
+    Availability limits for renewable and non-renewable resources.
+
+    Attributes
+    ----------
+    renewable_capacity : Dict[int, float]
+        Per renewable resource k, the amount available *on each day*. A resource
+        omitted from the mapping is treated as unlimited.
+    nonrenewable_capacity : Dict[int, float]
+        Per non-renewable resource l, the amount available *in total across the whole
+        horizon*. A resource omitted from the mapping is treated as unlimited.
+
+    Notes
+    -----
+    This is the constraint that makes the problem resource-*constrained*: without it
+    the schedule is limited only by precedence and by ``FinanceParams.CC_daily_cap``.
+    Passing ``resources=None`` to :class:`~rcpsp_cf_ivfth.model.RCPSP_CF_IVFTH`
+    reproduces the unconstrained behaviour.
+
+    Examples
+    --------
+    >>> ResourceParams(renewable_capacity={1: 6.0, 2: 3.0}, nonrenewable_capacity={1: 40.0})
+    ResourceParams(renewable_capacity={1: 6.0, 2: 3.0}, nonrenewable_capacity={1: 40.0})
+    """
+
+    renewable_capacity: Dict[int, float] = field(default_factory=dict)
+    nonrenewable_capacity: Dict[int, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for label, mapping in (
+            ("renewable_capacity", self.renewable_capacity),
+            ("nonrenewable_capacity", self.nonrenewable_capacity),
+        ):
+            for res_id, capacity in mapping.items():
+                if capacity < 0:
+                    raise ValueError(
+                        f"{label}[{res_id}] must be non-negative; received {capacity}."
+                    )
+
+    def renewable_limit(self, resource_id: int) -> Optional[float]:
+        """Return the daily limit for renewable ``resource_id``, or None if unlimited."""
+        return self.renewable_capacity.get(resource_id)
+
+    def nonrenewable_limit(self, resource_id: int) -> Optional[float]:
+        """Return the horizon-wide limit for non-renewable ``resource_id``, or None."""
+        return self.nonrenewable_capacity.get(resource_id)
 
 
 @dataclass
@@ -112,8 +174,10 @@ class CalendarParams:
 
     Notes
     -----
-    - The model uses days (t) and periods (y). You must set T_days and the period intervals coherently.
+    - The model uses days (t) and periods (y). You must set T_days and the period
+      intervals coherently.
     """
+
     T_days: int
     Y_periods: List[Tuple[int, int]]
 
@@ -131,12 +195,14 @@ class IVFTHWeights:
         Weight for objective 2 membership (final cash-flow).
     gamma_tradeoff : float
         Trade-off parameter in [0, 1].
-        Objective: maximize ``gamma_tradeoff * zeta + (1 - gamma_tradeoff) * (theta1 * mu1 + theta2 * mu2)``.
+        Objective: maximize
+        ``gamma_tradeoff * zeta + (1 - gamma_tradeoff) * (theta1*mu1 + theta2*mu2)``.
 
     Notes
     -----
     ``mu1`` and ``mu2`` are non-negative and satisfy ``mu1 + mu2 = 1`` (enforced with tolerance).
     """
+
     theta1: float
     theta2: float
     gamma_tradeoff: float
@@ -170,8 +236,10 @@ class IVFTHTargets:
     Notes
     -----
     These targets can be computed by separate runs (min Z1, max Z2) or set by domain knowledge.
-    The membership functions ``mu1`` and ``mu2`` are linear in ``Z1`` and ``Z2`` using these PiS/NiS anchors.
+    The membership functions ``mu1`` and ``mu2`` are linear in ``Z1`` and ``Z2``
+    using these PiS/NiS anchors.
     """
+
     alpha_level: float
     Z1_PIS: float
     Z1_NIS: float

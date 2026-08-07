@@ -1,0 +1,20 @@
+# flake8 cannot read pyproject.toml, so its configuration lives here.
+# Keep line-length in sync with [tool.black] and [tool.isort] in pyproject.toml.
+[flake8]
+max-line-length = 100
+extend-ignore =
+    # E203: slice-colon spacing, disagrees with black
+    E203,
+    # W503: line break before binary operator, disagrees with black
+    W503,
+    # D1xx/D2xx/D4xx: docstring style, reported only when flake8-docstrings happens to
+    # be installed. Ignored explicitly so the result does not depend on which optional
+    # plugins are present in a given environment.
+    D
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    .venv,
+    .eggs

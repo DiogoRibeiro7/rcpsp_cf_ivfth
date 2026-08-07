@@ -18,6 +18,24 @@ activities, finance, calendar = build_toy_instance()
 - `calendar`: `CalendarParams`
   - Defines the time horizon (`T_days`) and accounting periods (`Y_periods`) used for cash aggregation.
 
+A fourth, optional object controls resource availability:
+
+```python
+from rcpsp_cf_ivfth.examples import build_toy_resources
+
+resources = build_toy_resources()
+ivfth = RCPSP_CF_IVFTH(activities, finance, calendar, resources)
+```
+
+- `resources`: `ResourceParams`
+  - `renewable_capacity` maps each renewable resource to the amount available **on each
+    day**; `nonrenewable_capacity` maps each non-renewable resource to the amount
+    available **in total across the horizon**.
+  - A resource left out of either mapping is unlimited, and passing no `ResourceParams`
+    at all leaves the schedule limited only by precedence and `CC_daily_cap`.
+  - If the capacity is below what every mode of some activity needs, the model is
+    infeasible and `solve()` raises a `RuntimeError` saying so.
+
 ### Steps to customize
 
 1. **Duplicate the template**: Copy `build_toy_instance` and rename it (e.g., `build_case_study_instance`) to keep the toy data intact.
@@ -65,12 +83,19 @@ Document the procedure you used to derive PiS/NiS values so future runs remain r
 
 ## 3. Run your scenario
 
+The bundled example takes no arguments — it builds the toy instance and solves it with
+the first available backend:
+
 ```bash
-python -m rcpsp_cf_ivfth.examples.toy_instance \
-  --solver cbc \
-  --alpha 0.5 \
-  --pis 40 25000 \
-  --nis 120 0
+python -m rcpsp_cf_ivfth.examples
+```
+
+For your own data, drive the package from Python:
+
+```python
+ivfth = RCPSP_CF_IVFTH(activities, finance, calendar, resources)
+model = ivfth.build_model(targets, weights)
+result = ivfth.solve(model, solver_name="appsi_highs", timelimit=300, tee=True)
 ```
 
 If you expose multiple scenario builders, wire them to CLI arguments or environment variables so you can switch datasets without editing package code.
@@ -78,7 +103,9 @@ If you expose multiple scenario builders, wire them to CLI arguments or environm
 ## 4. Validate results
 
 - Run `pytest` to ensure your custom instance still satisfies the structural tests in `tests/test_examples.py`.
-- Enable solver logs (`solver_options={"tee": True}`) when debugging infeasibilities or non-optimal status reports.
+- Use `pytest -m "not solver"` when no MILP backend is installed.
+- Enable solver logs with `ivfth.solve(..., tee=True)` when debugging infeasibilities or non-optimal status reports.
+- An infeasible model raises `RuntimeError` from `solve()` naming the termination condition; the usual causes are resource capacities below what every mode needs, too tight a `CC_daily_cap`, or loan limits that cannot cover the schedule.
 
 ## 5. Visualize results
 
@@ -99,7 +126,7 @@ ivfth = RCPSP_CF_IVFTH(activities, finance, calendar, logging_enabled=True)
 targets = IVFTHTargets(alpha_level=0.5, Z1_PIS=10.0, Z1_NIS=60.0, Z2_PIS=30000.0, Z2_NIS=0.0)
 weights = IVFTHWeights(theta1=0.5, theta2=0.5, gamma_tradeoff=0.5)
 model = ivfth.build_model(targets, weights)
-result = ivfth.solve(model, solver_name="cbc", tee=False)
+result = ivfth.solve(model, solver_name="appsi_highs", tee=False)
 
 solution = ivfth.extract_solution(model, solver_metadata=result)
 create_gantt_chart(solution)

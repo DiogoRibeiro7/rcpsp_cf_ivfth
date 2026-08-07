@@ -1,11 +1,12 @@
 """
 Fuzzy number definitions for RCPSP-CF-IVFTH.
 
-This module contains the NIVTF (Normalized Interval-Valued Triangular Fuzzy) 
+This module contains the NIVTF (Normalized Interval-Valued Triangular Fuzzy)
 number implementation and related fuzzy arithmetic operations.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -18,7 +19,8 @@ class NIVTF:
 
     For a triangular fuzzy number (a_o, a_m, a_p) we follow the paper's normalization:
     - normalized => peak membership = 1 at a_m
-    - For NIVTF: lower triangle L = (a_o^L, a_m^L, a_p^L) and upper triangle U = (a_o^U, a_m^U, a_p^U)
+    - For NIVTF: lower triangle L = (a_o^L, a_m^L, a_p^L) and upper triangle
+      U = (a_o^U, a_m^U, a_p^U)
       with a_m^L = a_m^U and  a_o^U < a_o^L < a_m^L(=a_m^U) < a_p^L < a_p^U.
 
     In the paper:
@@ -34,6 +36,7 @@ class NIVTF:
     Input Validation:
         - Ensures the order constraints for NIVTF are satisfied (best-effort checks).
     """
+
     ao_L: float
     am_L: float
     ap_L: float
@@ -84,7 +87,9 @@ class NIVTF:
         return 0.5 * (self.EV_L() + self.EV_U())
 
 
-def create_triangle(a0: float, am: float, ap: float, widen: float = 1.0) -> Tuple[float, float, float, float, float, float]:
+def create_triangle(
+    a0: float, am: float, ap: float, widen: float = 1.0
+) -> Tuple[float, float, float, float, float, float]:
     """
     Convenience function to create an NIVTF by widening lower/upper supports around am.
 
@@ -98,7 +103,7 @@ def create_triangle(a0: float, am: float, ap: float, widen: float = 1.0) -> Tupl
     Returns
     -------
     NIVTF args: (ao_L, am_L, ap_L, ao_U, am_U, ap_U)
-        
+
     Examples
     --------
     >>> args = create_triangle(5, 7, 9, widen=0.5)

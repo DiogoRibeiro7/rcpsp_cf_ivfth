@@ -8,10 +8,13 @@ varying alpha levels, IVF-TH weights, or finance parameters.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .data import FinanceParams, IVFTHTargets, IVFTHWeights
+from .data import IVFTHTargets, IVFTHWeights
 from .model import RCPSP_CF_IVFTH
+
+if TYPE_CHECKING:  # pragma: no cover - import used only for type annotations
+    import pandas as pd
 
 __all__ = [
     "run_alpha_sweep",
@@ -37,7 +40,8 @@ def _require_matplotlib():
         import matplotlib.pyplot as plt  # type: ignore
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError(
-            "matplotlib is required for plotting sensitivity analysis. Install it with `pip install matplotlib`."
+            "matplotlib is required for plotting sensitivity analysis. "
+            "Install it with `pip install matplotlib`."
         ) from exc
     return plt
 
@@ -114,7 +118,9 @@ def run_weight_scenarios(
     rows: List[Dict[str, Any]] = []
     for theta1, theta2, gamma in weight_configs:
         if abs(theta1 + theta2 - 1.0) > 1e-9:
-            raise ValueError(f"Theta weights must sum to 1. Received theta1={theta1}, theta2={theta2}.")
+            raise ValueError(
+                f"Theta weights must sum to 1. Received theta1={theta1}, theta2={theta2}."
+            )
         weights = IVFTHWeights(theta1=theta1, theta2=theta2, gamma_tradeoff=gamma)
         metrics = _solve_scenario(
             ivfth,
@@ -165,6 +171,7 @@ def run_finance_scenarios(
             base_acts,
             finance_variant,
             base_calendar,
+            ivfth.resources,
             **base_logging,
         )
         metrics = _solve_scenario(
@@ -244,10 +251,15 @@ def plot_metric_trends(
 
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Expected a pandas DataFrame for plotting.")
-    if x_column not in df.columns:
-        raise ValueError(f"Column '{x_column}' not found in DataFrame.")
 
+    # Reset first, then validate: run_alpha_sweep returns alpha_level as the *index*,
+    # so validating against df.columns rejected the function's primary input.
     plot_df = df.reset_index(drop=False)
+    if x_column not in plot_df.columns:
+        raise ValueError(
+            f"Column '{x_column}' not found in DataFrame. " f"Available: {sorted(plot_df.columns)}"
+        )
+
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 4))
     else:

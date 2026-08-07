@@ -2,7 +2,7 @@
   "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
   "@type": "SoftwareSourceCode",
   "name": "RCPSP-CF-IVFTH",
-  "identifier": "https://doi.org/10.5281/zenodo.1733326",
+  "identifier": "https://doi.org/10.5281/zenodo.17382196",
   "description": "Bi-objective Resource-Constrained Project Scheduling with Cash-Flow under Interval-Valued Fuzzy Uncertainty",
   "author": [
     {
@@ -16,8 +16,8 @@
   "license": "https://spdx.org/licenses/MIT",
   "codeRepository": "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth",
   "programmingLanguage": "Python",
-  "runtimePlatform": "Python 3.8+",
-  "version": "1.0.0",
+  "runtimePlatform": "Python 3.9+",
+  "version": "2.0.0",
   "dateCreated": "2025-09-11",
   "datePublished": "2025-09-11",
   "keywords": [
@@ -29,5 +29,5 @@
   ],
   "applicationCategory": "Scientific/Engineering",
   "developmentStatus": "active",
-  "sameAs": "https://doi.org/10.5281/zenodo.1733326"
+  "sameAs": "https://doi.org/10.5281/zenodo.17382196"
 }

@@ -8,10 +8,10 @@ plots and exportable formats.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Tuple
-import json
 import csv
+import json
+from pathlib import Path
+from typing import Any, Dict, Iterable, Tuple
 
 __all__ = [
     "create_gantt_chart",
@@ -68,25 +68,37 @@ def create_gantt_chart(
         duration = entry["duration"]
         finish = entry["finish"]
         mode = entry.get("mode", "")
-        ax.barh(
-            idx,
-            duration,
-            left=start,
-            height=0.4,
-            align="center",
-            color="#4C78A8",
-            edgecolor="black",
-        )
-        ax.text(
-            start + duration / 2,
-            idx,
-            f"{activity} (M{mode})\n{start}->{finish}",
-            ha="center",
-            va="center",
-            color="white",
-            fontsize=9,
-            weight="bold",
-        )
+        if duration <= 0:
+            # Zero-duration milestone (typically Start/End): a bar would be invisible.
+            ax.plot(start, idx, marker="D", markersize=9, color="#B07AA1")
+            ax.text(
+                start,
+                idx + 0.32,
+                f"{activity} (day {start})",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+        else:
+            ax.barh(
+                idx,
+                duration,
+                left=start,
+                height=0.4,
+                align="center",
+                color="#4C78A8",
+                edgecolor="black",
+            )
+            ax.text(
+                start + duration / 2,
+                idx,
+                f"{activity} (M{mode})\n{start}->{finish}",
+                ha="center",
+                va="center",
+                color="white",
+                fontsize=9,
+                weight="bold",
+            )
         yticks.append(idx)
         ylabels.append(activity)
 
