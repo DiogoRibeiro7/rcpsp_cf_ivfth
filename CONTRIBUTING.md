@@ -95,12 +95,29 @@ RCPSP-CF-IVFTH is a Python package that relies on Pyomo and an MILP solver.
 - PRs require at least one maintainer approval before merge.
 
 ## Release Process
-Releases are handled by maintainers:
+Releases are cut by hand, deliberately: publishing a release mints a Zenodo DOI, which
+cannot be withdrawn afterwards, so it should never happen as a side effect of a merge.
+
 1. Ensure `main` is green and up to date.
-2. Update the version in `pyproject.toml` (the package reads it from installed metadata)
-   and the dates in `CITATION.cff` and `codemeta.json`.
-3. Run the "Release (manual, from pyproject)" workflow, which tags and publishes.
-4. Publish release notes summarizing major changes and migration steps.
+2. Update the version in `pyproject.toml` (the package reads it from installed metadata
+   at runtime, so this is the single source of truth).
+3. Update the release dates in `CITATION.cff` (both the top level and the
+   `preferred-citation` block) and `datePublished` in `codemeta.json`. Leave
+   `dateCreated` alone.
+4. Add the version heading and its notes to `CHANGELOG.md`.
+5. Merge the above, then tag the merge commit on `main` and push the tag:
+   ```bash
+   git checkout main && git pull
+   git tag -a v2.1.0 -m "v2.1.0"
+   git push origin v2.1.0
+   ```
+6. Publish the release, writing notes that summarise the change and any migration steps:
+   ```bash
+   gh release create v2.1.0 --title v2.1.0 --notes-file RELEASE_NOTES.md
+   ```
+   If the release changes what the model computes, say so at the top of the notes:
+   anyone citing an earlier DOI needs to know their results are not comparable.
+7. Confirm the DOI appears on Zenodo and that the badge in `README.md` still resolves.
 
 ## Community Expectations
 - Be kind and constructive in all communications.
