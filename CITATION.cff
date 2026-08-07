@@ -19,7 +19,7 @@ repository-code: "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
 url: "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
 license: MIT
 version: "2.0.0"
-date-released: "2025-09-11"
+date-released: "2026-08-07"
 doi: 10.5281/zenodo.17382196
 identifiers:
   - type: doi
@@ -48,7 +48,7 @@ preferred-citation:
       given-names: Diogo
       email: dfr@esmad.ipp.pt
   version: "2.0.0"
-  date-released: "2025-09-11"
+  date-released: "2026-08-07"
   doi: 10.5281/zenodo.17382196
   repository-code: "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
   license: MIT

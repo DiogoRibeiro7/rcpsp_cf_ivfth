@@ -4,8 +4,7 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| main    | ✅                 |
-| develop | ✅ (active branch) |
+| main    | ✅ (active branch) |
 | others  | ❌                 |
 
 Security fixes are released as part of the regular development cycle. Legacy tags are not patched.
