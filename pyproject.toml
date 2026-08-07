@@ -41,7 +41,7 @@ visualization = [
 ]
 # rcpsp_cf_ivfth.sensitivity returns pandas DataFrames and plots them.
 sensitivity = [
-    "matplotlib>=3.5",
+    "matplotlib>=3.9.4",
     "pandas>=1.5",
 ]
 solvers = [
@@ -55,7 +55,7 @@ docs = [
 test = [
     "pytest>=8.4.2",
     "pytest-cov>=4",
-    "matplotlib>=3.5",
+    "matplotlib>=3.9.4",
     "pandas>=1.5",
     "highspy>=1.7",
 ]
