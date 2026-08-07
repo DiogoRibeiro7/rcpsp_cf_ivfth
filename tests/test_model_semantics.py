@@ -86,18 +86,27 @@ class TestPaymentBalance:
         last_period = max(solution["cash_flow"]["delayed_payments"])
         assert solution["cash_flow"]["delayed_payments"][last_period] == pytest.approx(0.0, abs=TOL)
 
-    def test_second_objective_is_not_degenerate(
-        self, toy_instance, ivfth_targets, ivfth_weights, solver_name
+    def test_final_cash_flow_does_not_track_the_target(
+        self, toy_instance, ivfth_weights, solver_name
     ):
         """
-        With unbounded payments mu2 was 1.0 in every run, which removed the cash-flow
-        objective from the problem entirely and made the bi-objective trade-off a no-op.
+        The sharpest symptom of the unbounded-payment bug: because PA[y] was free, the
+        solver could manufacture whatever cash the aspiration level asked for, so
+        CF_final rose with Z2_PIS and mu2 sat at 1.0 in every run.
+
+        With payments tied to realised revenue, CF_final is decided by the cash the
+        project actually generates and is therefore invariant to the anchor.
         """
         activities, finance, calendar = toy_instance
-        result, _ = solved(activities, finance, calendar, ivfth_targets, ivfth_weights, solver_name)
+        results = []
+        for z2_pis in (30_000.0, 3_000_000.0):
+            targets = IVFTHTargets(
+                alpha_level=0.5, Z1_PIS=10.0, Z1_NIS=60.0, Z2_PIS=z2_pis, Z2_NIS=0.0
+            )
+            result, _ = solved(activities, finance, calendar, targets, ivfth_weights, solver_name)
+            results.append(result["CF_final"])
 
-        assert result["mu2"] < 1.0 - TOL
-        assert result["CF_final"] < ivfth_targets.Z2_PIS
+        assert results[0] == pytest.approx(results[1], rel=1e-6)
 
 
 @pytest.mark.solver
@@ -201,7 +210,13 @@ class TestResourceProfile:
 
 @pytest.mark.solver
 class TestFinancing:
-    """Debt must cost money, and it must be repaid inside the horizon."""
+    """
+    The cash-flow recurrence must match equations (20) and (21) exactly.
+
+    Note that the two loan terms are *divisions* in the published model, so a higher
+    interest rate deducts *less* from cash flow. That reads backwards economically and
+    invites a well-meaning "fix", which is precisely why it is pinned here.
+    """
 
     @staticmethod
     def _cash_starved_instance():
@@ -209,16 +224,64 @@ class TestFinancing:
         activities, finance, calendar = build_toy_instance()
         return activities, replace(finance, IC=200.0), calendar
 
-    def test_higher_loan_interest_never_improves_cash_flow(
+    def test_first_period_matches_equation_20(
+        self, toy_instance, ivfth_targets, ivfth_weights, solver_name
+    ):
+        """CF[1] = IC + STL[1] + LTL + PA[1] - TBU[1]."""
+        activities, finance, calendar = toy_instance
+        _, solution = solved(
+            activities, finance, calendar, ivfth_targets, ivfth_weights, solver_name
+        )
+
+        expected = (
+            finance.IC
+            + solution["loans"]["STL"][1]
+            + solution["loans"]["LTL"]
+            + solution["cash_flow"]["payments"][1]
+            - solution["resources"]["period_cost"][1]
+        )
+        assert solution["cash_flow"]["periods"][1] == pytest.approx(expected, rel=1e-6)
+
+    def test_later_periods_match_equation_21(self, ivfth_targets, ivfth_weights, solver_name):
+        """
+        CF[y] = STL[y] + CF[y-1](1+a)^30 + PA[y] + DP[y-1](1+b)^30
+                - TBU[y] - LTL/(1+g)^30 - STL[y-1]/(1+d)^30
+        """
+        activities, finance, calendar = self._cash_starved_instance()
+        _, solution = solved(
+            activities, finance, calendar, ivfth_targets, ivfth_weights, solver_name
+        )
+
+        cf = solution["cash_flow"]["periods"]
+        pa = solution["cash_flow"]["payments"]
+        dp = solution["cash_flow"]["delayed_payments"]
+        stl = solution["loans"]["STL"]
+        ltl = solution["loans"]["LTL"]
+        tbu = solution["resources"]["period_cost"]
+
+        for y in sorted(cf)[1:]:
+            expected = (
+                stl[y]
+                + cf[y - 1] * (1.0 + finance.alpha_excess_cash) ** 30
+                + pa[y]
+                + dp[y - 1] * (1.0 + finance.beta_delayed_pay) ** 30
+                - tbu[y]
+                - ltl / (1.0 + finance.gamma_LTL) ** 30
+                - stl[y - 1] / (1.0 + finance.delta_STL) ** 30
+            )
+            assert cf[y] == pytest.approx(expected, rel=1e-6), f"period {y}"
+
+    def test_loan_interest_is_applied_as_a_division(
         self, ivfth_targets, ivfth_weights, solver_name
     ):
         """
-        Dividing by the rate factor made debt *cheaper* as interest rose, so raising a
-        rate could increase the reported final cash flow.
+        Guards the published direction of the loan terms. Under a multiplication the
+        deduction would grow with the rate; under the paper's division it shrinks, so
+        raising the rates cannot lower the objective.
         """
         activities, finance, calendar = self._cash_starved_instance()
 
-        cheap, _ = solved(
+        low, _ = solved(
             activities,
             replace(finance, delta_STL=0.02, gamma_LTL=0.02),
             calendar,
@@ -226,7 +289,7 @@ class TestFinancing:
             ivfth_weights,
             solver_name,
         )
-        expensive, _ = solved(
+        high, _ = solved(
             activities,
             replace(finance, delta_STL=0.40, gamma_LTL=0.40),
             calendar,
@@ -235,30 +298,7 @@ class TestFinancing:
             solver_name,
         )
 
-        assert expensive["CF_final"] <= cheap["CF_final"] + TOL
-
-    def test_final_cash_flow_is_net_of_outstanding_debt(
-        self, ivfth_targets, ivfth_weights, solver_name
-    ):
-        """
-        A loan drawn in the final period used to be pure profit, because nothing
-        repaid it before the horizon ended.
-        """
-        activities, finance, calendar = self._cash_starved_instance()
-        result, solution = solved(
-            activities, finance, calendar, ivfth_targets, ivfth_weights, solver_name
-        )
-
-        last_period = max(solution["loans"]["STL"])
-        borrowed = solution["loans"]["STL"][last_period] + solution["loans"]["LTL"]
-        # Whatever is still borrowed at the end cannot also be counted as final cash.
-        assert (
-            result["CF_final"]
-            <= sum(activities[e["activity"]].modes[e["mode"]].payment for e in solution["schedule"])
-            + finance.IC
-            + TOL
-        )
-        assert borrowed >= -TOL
+        assert high["objective"] >= low["objective"] - TOL
 
 
 @pytest.mark.solver
@@ -317,25 +357,39 @@ class TestScheduleConsistency:
         )
 
 
-class TestActiveDaysHelper:
-    """The resource span must agree with the gap precedence enforces."""
+class TestResourceSpanHelper:
+    """
+    Constraints (31)/(32) size the resource window with the expected value of the
+    lower triangle, independently of alpha - unlike precedence (30), which uses the
+    alpha blend. The two are meant to differ.
+    """
 
     def test_zero_duration_occupies_no_days(self):
         milestone = NIVTF(*create_triangle(0, 0, 0))
-        assert RCPSP_CF_IVFTH._active_days(milestone, alpha=0.5) == 0
+        assert RCPSP_CF_IVFTH._resource_span_days(milestone) == 0
 
-    def test_span_rounds_up_to_whole_days(self):
+    def test_span_is_the_expected_value_rounded_up(self):
         duration = NIVTF(*create_triangle(6, 8, 10, widen=0.6))
-        blend = RCPSP_CF_IVFTH._alpha_blend_duration(duration, alpha=0.5)
-        span = RCPSP_CF_IVFTH._active_days(duration, alpha=0.5)
+        expected_value = duration.EV_L()
+        span = RCPSP_CF_IVFTH._resource_span_days(duration)
 
-        assert span >= blend
-        assert span - blend < 1.0
+        assert span >= expected_value
+        assert span - expected_value < 1.0
 
-    @pytest.mark.parametrize("alpha", [0.0, 0.25, 0.5, 0.75, 1.0])
-    def test_span_is_positive_for_real_work(self, alpha):
+    def test_span_does_not_depend_on_alpha(self):
+        """The window length is EV-based, so alpha must not enter it."""
         duration = NIVTF(*create_triangle(3, 5, 7, widen=0.4))
-        assert RCPSP_CF_IVFTH._active_days(duration, alpha=alpha) >= 1
+        spans = {RCPSP_CF_IVFTH._resource_span_days(duration) for _ in range(3)}
+
+        assert len(spans) == 1
+        assert spans.pop() >= 1
+
+    @pytest.mark.parametrize("alpha", [0.0, 0.5, 1.0])
+    def test_precedence_blend_does_depend_on_alpha(self, alpha):
+        duration = NIVTF(*create_triangle(3, 5, 7, widen=0.4))
+        blend = RCPSP_CF_IVFTH._alpha_blend_duration(duration, alpha=alpha)
+
+        assert blend == pytest.approx(alpha * duration.E2_L() + (1.0 - alpha) * duration.E1_L())
 
 
 class TestCycleDetection:

@@ -8,7 +8,14 @@ Bi-objective **Resource-Constrained Project Scheduling with Cash-Flow** under **
 
 This repository implements the model from:
 
-> _A New Bi-Objective Model for Resource-Constrained Project Scheduling and Cash Flow Problems with Financial Constraints under Uncertainty: A Case Study_ (multi-mode RCPSP, cash-flow constraints, delayed payments, interest on loans/excess cash, and interval-valued fuzzy numbers)
+> Mirnezami, S.-A., Ghasemi, M., & Shahabi-Shahmiri, R. _A New Bi-Objective Model for
+> Resource-Constrained Project Scheduling and Cash Flow Problems with Financial
+> Constraints under Uncertainty: A Case Study_.
+> [arXiv:2509.00002](https://arxiv.org/abs/2509.00002)
+
+Multi-mode RCPSP with cash-flow constraints, delayed payments, interest on
+loans/excess cash, and interval-valued fuzzy numbers. Equation numbers referenced
+throughout this README and in the source comments are the paper's.
 
 --------------------------------------------------------------------------------
 
@@ -21,8 +28,9 @@ This repository implements the model from:
 - **Extended IVF–TH** scalarization (Torabi–Hassini) to convert the fuzzy bi-objective to a single-objective MILP.
 - Written in pure Python with **Pyomo**. Works with HiGHS/GLPK/CBC/CPLEX/Gurobi.
 
-> **Upgrading from 1.x?** Version 2.0.0 corrects four defects in the formulation, so
-> every numerical result changes. See the [CHANGELOG](CHANGELOG.md) before comparing
+> **Upgrading from 1.x?** Version 2.0.0 corrects two places where the implementation
+> departed from the paper, so numerical results change. See the
+> [CHANGELOG](CHANGELOG.md) and *Deviations from the paper* below before comparing
 > against previously published runs.
 
 --------------------------------------------------------------------------------
@@ -222,31 +230,71 @@ For best results, pre-compute the PiS/NiS anchors by solving single-objective pr
   - Unique completion per activity: `∑_{m,t} Xp_{i,m,t} = 1`
   - Period mapping `XYp` (ties completion day to a long period)
 
-- **Resources & costs**
-  - Daily demand counts only activities whose **active window covers day `t`**: an
-    activity started at `h` occupies days `h … h + span − 1`, where `span` is the
-    α-blend duration rounded up, and releases its resources afterwards.
-  - Availability (when `ResourceParams` is supplied): `BR_{k,t} ≤ R_k` per day,
-    and `∑_t WR_{l,t} ≤ W_l` across the horizon.
+- **Resources & costs** (9)–(12), (31)–(32)
+  - Daily demand counts only activities whose **window covers day `t`**: an activity
+    started at `h` occupies days `h … h + span − 1` and releases its resources
+    afterwards. `span` is the expected value `(d_o + 2·d_m + d_p)/4` of the lower
+    triangle, per (31)/(32) — note this differs from the α-blend that precedence
+    (30) uses.
   - Daily cost `BU_t` ≥ Σ(CR_k·BR_{k,t}) + Σ(CW_l·WR_{l,t})
-  - Daily cap: `BU_t ≤ CC`
+  - Daily cap: `BU_t ≤ CC` — in the published model this is the *only* thing limiting
+    resource use. Explicit availability limits are an optional extension (see
+    `ResourceParams`): `BR_{k,t} ≤ R_k` per day and `∑_t WR_{l,t} ≤ W_l` overall.
 
-- **Finance & cash flow**
+- **Finance & cash flow** (18)–(24)
   - Periodic total cost: `TBU_y = ∑ BU_t` in `[a_y, b_y]`
-  - Payment balance (≤ 1 period delay), as an **equality**: revenue earned in period
-    `y` is either collected then or deferred once — `∑ PA_{i,m}·XYp = PA_y + DP_y`,
-    with `DP_{Y_n} = 0` so nothing is deferred past the horizon.
-  - Cash flow recurrence with interest on **excess cash** and **delayed payments**,
-    and debt service on **loans**: `− STL_{y−1}·(1+δ)` repays the prior short-term
-    loan, `− LTL·γ` services the long-term loan.
-  - Terminal settlement: the final period clears outstanding principal, so
-    `Z2 = CF_{Y_n}` is cash kept, not cash still owed.
+  - Payment balance (≤ 1 period delay): revenue earned in period `y` is either
+    collected then or deferred once — `∑ PA_{i,m}·XYp = PA_y + DP_y`, with
+    `DP_{Y_n} = 0`. See *Deviations from the paper* below.
+  - Cash flow recurrence (21) with interest on **excess cash** `CF_{y−1}(1+α)^30`,
+    **delayed payments** `DP_{y−1}(1+β)^30`, and **loans**
+    `− LTL/(1+γ)^30 − STL_{y−1}/(1+δ)^30`. All four rates are *daily* rates
+    compounded over a 30-day period.
   - Loan caps (`LTL ≤ maxLTL`, `STL_y ≤ maxSTL`), CF floors (`CF_y ≥ minCF`)
 
-- **Objectives (IVF–TH)**
+- **Objectives (IVF–TH)** (5), (6), (27), (28)
   - Z1 = `Cmax`, Z2 = `CF_{Y_n}`
   - Memberships `μ1, μ2` linear in (Z1, Z2) using PiS/NiS anchors
   - Scalarization: `max γ·λ + (1-γ)(θ1 μ1 + θ2 μ2)` with `λ ≤ μ1, λ ≤ μ2`
+
+--------------------------------------------------------------------------------
+
+## Deviations from the paper
+
+The reference implementation follows the source
+([arXiv:2509.00002](https://arxiv.org/abs/2509.00002)) equation for equation, with
+two documented exceptions.
+
+**1. Constraint (18) is implemented as an equality.** The paper prints
+
+> `∑_i ∑_m ∑_t PA_{i,m}·XYP_{i,m,y,t} − PA_y ≤ DP_y`
+
+which bounds `PA_y` only from below. Since `PA_y` is a free non-negative variable
+feeding the cash-flow recurrence, the solver can set it arbitrarily high — on the toy
+instance it returns `PA_1 = 111,999.98` against `8,400` of real payments, and
+`CF_final` simply tracks whatever `Z2_PIS` you ask for, pinning `μ2` at 1.0. The
+second objective then has no effect on the solution.
+
+This package uses `∑ PA_{i,m}·XYP = PA_y + DP_y` with `DP_{Y_n} = 0`, matching the
+model the paper describes in prose (payments "permitted to be delayed partly or
+completely"; "delayed payments of the last period can be received in the next
+period"). If you need the printed inequality to reproduce a specific published
+figure, open an issue — it is a one-line change.
+
+**2. The resource window in (31)/(32) is transposed.** The paper writes the sum over
+`h = t … t + span − 1`, which would have an activity consuming resources on days
+*before* it starts. The window is implemented as `h = t − span + 1 … t`, so
+`BR_{k,t}` is the demand actually in place on day `t`.
+
+**Not a deviation:** the loan terms `− LTL/(1+γ)^30` and `− STL_{y−1}/(1+δ)^30` in
+(21) are divisions, so a *higher* interest rate deducts *less* from cash flow. This
+reads backwards economically but is exactly what equations (1), (2) and (21)
+specify, so it is reproduced as published and pinned by tests. Likewise the four
+interest rates are *daily* rates compounded over 30 days, not per-period rates.
+
+Resource availability limits (`ResourceParams`) are an optional **extension**: the
+paper has no availability parameter and bounds resource use only through the maximum
+daily cost `CC`. The default (`resources=None`) reproduces the paper.
 
 --------------------------------------------------------------------------------
 

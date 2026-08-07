@@ -99,13 +99,13 @@ Financial parameters for the model.
 ## Attributes
 
 alpha\_excess\_cash : float
-Effective interest earned on cash carried into the next accounting period.
+Daily interest rate on excess cash, applied as `(1+alpha)**30` per period.
 beta\_delayed\_pay : float
-Effective compensation earned on a payment deferred by one accounting period.
+Daily interest rate on delayed payments, applied as `(1+beta)**30`.
 gamma\_LTL : float
-Effective interest charged on the long-term loan per accounting period.
+Daily interest rate on the long-term loan, applied as `LTL/(1+gamma)**30`.
 delta\_STL : float
-Effective interest charged on a short-term loan over its one-period life.
+Daily interest rate on short-term loans, applied as `STL/(1+delta)**30`.
 IC : float
 Initial capital (received at period 1).
 max\_LTL : float
@@ -123,10 +123,11 @@ Cost per unit of non-renewable resource l per day.
 
 ## Notes
 
-All four interest rates are *effective rates per accounting period*, applied
-directly (not compounded over 30 days). With the default toy values this means
-1.25% earned on cash carried forward, 6% charged per period on the long-term
-loan, and so on.
+All four rates are *daily* rates compounded over a 30-day accounting period, per
+equations (1)-(4) of the paper. Note that the two loan terms enter the cash-flow
+recurrence as divisions, `LTL/(1+gamma)**30` and `STL/(1+delta)**30`, so a
+higher rate reduces the amount deducted. That is the published formulation; see
+the model notes in the README before changing it.
 
 FinanceParams( alpha\_excess\_cash: float, beta\_delayed\_pay: float, gamma\_LTL: float, delta\_STL: float, IC: float, max\_LTL: float, max\_STL: float, min\_CF: float, CC\_daily\_cap: float, CR\_k: Dict[int, float], CW\_l: Dict[int, float])
 
@@ -196,10 +197,14 @@ horizon*. A resource omitted from the mapping is treated as unlimited.
 
 ## Notes
 
-This is the constraint that makes the problem resource-*constrained*: without it
-the schedule is limited only by precedence and by `FinanceParams.CC_daily_cap`.
-Passing `resources=None` to :class:`~rcpsp_cf_ivfth.model.RCPSP_CF_IVFTH`
-reproduces the unconstrained behaviour.
+This is an **extension beyond the published model**. The paper has no resource
+availability parameter: `BR_kt` and `WR_lt` are free variables and resource
+use is limited only indirectly, through the maximum daily resource cost `CC`
+(constraint (12)). Supplying explicit capacities lets you model a hard resource
+ceiling instead.
+
+Passing `resources=None` to :class:`~rcpsp_cf_ivfth.model.RCPSP_CF_IVFTH` is
+the default and reproduces the paper's formulation exactly.
 
 ## Examples
 

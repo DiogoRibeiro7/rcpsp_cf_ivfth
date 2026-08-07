@@ -359,23 +359,25 @@ class RCPSP_CF_IVFTH:
     @staticmethod
     def _alpha_blend_duration(nivtf: NIVTF, alpha: float) -> float:
         """
-        Crisp duration used throughout the model: ``alpha*E2_L + (1-alpha)*E1_L``.
-
-        This is the same blend that constraint (30) applies to precedence, so the
-        span an activity occupies on the resource profile agrees with the gap the
-        precedence constraint enforces between it and its successors.
+        Crisp duration used by the precedence constraint (30):
+        ``alpha*E2_L + (1-alpha)*E1_L``.
         """
         return alpha * nivtf.E2_L() + (1.0 - alpha) * nivtf.E1_L()
 
-    @classmethod
-    def _active_days(cls, nivtf: NIVTF, alpha: float) -> int:
+    @staticmethod
+    def _resource_span_days(nivtf: NIVTF) -> int:
         """
-        Number of whole days an activity occupies, rounded up from the alpha blend.
+        Number of whole days an activity occupies on the resource profile.
 
-        Zero-duration milestones (``Start``/``End``) return 0 and therefore never
-        appear on the resource profile.
+        Constraints (31) and (32) size the resource window with the *expected value*
+        ``(d_o + 2*d_m + d_p) / 4`` of the lower triangle, not with the alpha blend
+        that constraint (30) uses for precedence. The two therefore differ, which is
+        the paper's choice rather than an inconsistency here.
+
+        Zero-duration milestones (``Start``/``End``) return 0 and never appear on the
+        resource profile.
         """
-        span = cls._alpha_blend_duration(nivtf, alpha)
+        span = nivtf.EV_L()
         if span <= 0.0:
             return 0
         return max(1, int(math.ceil(span - 1e-9)))
@@ -868,9 +870,9 @@ class RCPSP_CF_IVFTH:
         m.precedence = Constraint(m.P, rule=lambda _m, i, j: precedence_rule(_m, i, j))
         self._log_debug("constraint_precedence_defined", arcs=len(P_edges))
 
-        # Per (activity, mode): the crisp span in whole days, and the alpha-blended
-        # daily demand for each resource. Precomputing these keeps the constraint
-        # rules linear in the horizon rather than quadratic.
+        # Per (activity, mode): the resource-window span in whole days, and the
+        # alpha-blended daily demand per resource, both per constraints (31)-(32).
+        # Precomputing keeps the rules linear in the horizon rather than quadratic.
         zero_nivtf = NIVTF(*create_triangle(0, 0, 0))
         span_im: Dict[Tuple[str, int], int] = {}
         renew_rate: Dict[Tuple[str, int, int], float] = {}
@@ -878,7 +880,7 @@ class RCPSP_CF_IVFTH:
         for i in I:
             for mm in M_i[i]:
                 mode = acts[i].modes[mm]
-                span_im[(i, mm)] = self._active_days(mode.duration, alpha)
+                span_im[(i, mm)] = self._resource_span_days(mode.duration)
                 for k in K:
                     renew_rate[(i, mm, k)] = self._res_use_alpha_L(
                         mode.renewables.get(k, zero_nivtf), alpha=alpha
@@ -896,9 +898,14 @@ class RCPSP_CF_IVFTH:
             first = max(1, t - span + 1)
             return list(range(first, t + 1))
 
-        # (9) Renewable demand on day t: only activities whose span *covers* t consume.
-        # An activity started at h occupies days h .. h+span-1 and is released after that,
-        # so the profile rises and falls with the schedule instead of accumulating.
+        # (9)/(31) Renewable demand on day t: only activities whose span *covers* t
+        # consume. An activity started at h occupies days h .. h+span-1 and is released
+        # afterwards, so the profile rises and falls with the schedule.
+        #
+        # The paper prints the window as h = t .. t+span-1, which would have an activity
+        # consuming resources on days *before* it starts. Read literally that cannot be
+        # right, so the window is implemented as h = t-span+1 .. t, the transposition
+        # that makes BR[k,t] the demand actually in place on day t.
         def renewable_rule(_m, k, t):
             terms = [
                 renew_rate[(i, mm, k)] * _m.X[(i, mm, h)]
@@ -1093,35 +1100,28 @@ class RCPSP_CF_IVFTH:
         m.tbu_def = Constraint(m.Y, rule=TBU_rule)
         self._log_debug("constraint_period_cost_defined", count=len(m.tbu_def))
 
-        # (20)-(21) Cash-flow recurrence.
+        # (20)-(21) Cash-flow recurrence, exactly as printed in the paper.
         #
-        # Interest rates are effective *per accounting period* and are applied directly.
-        # Debt service is a cost, so every rate must appear as a multiplication:
-        #   - a short-term loan taken in y-1 is repaid in full in y, principal plus
-        #     interest, as STL[y-1] * (1 + delta);
-        #   - the long-term loan is serviced each period at LTL * gamma.
-        # The original formulation divided by the rate factor, which made debt *cheaper*
-        # as interest rose.
+        # The four interest rates are *daily* rates compounded over a 30-day accounting
+        # period, per equations (1)-(4):
+        #   excess cash    CF[y-1] * (1 + alpha)^30
+        #   delayed pay    DP[y-1] * (1 + beta)^30
+        #   long-term loan LTL      / (1 + gamma)^30
+        #   short-term     STL[y-1] / (1 + delta)^30
         #
-        # The terminal period additionally settles the outstanding debt, so that
-        # Z2 = CF[Yn] measures cash the project actually keeps rather than borrowings it
-        # still owes. Without that settlement the solver maxes out STL[Yn] for free,
-        # because a loan drawn in the last period is never repaid inside the horizon.
-        ex = 1.0 + finance.alpha_excess_cash
-        bd = 1.0 + finance.beta_delayed_pay
-        gL = finance.gamma_LTL
-        dS = 1.0 + finance.delta_STL
-
-        def _terminal_settlement(_m, y):
-            if y != Yn:
-                return 0.0
-            return _m.LTL + _m.STL[y] * dS
+        # The two loan terms are *divisions*, which means a higher interest rate lowers
+        # the amount deducted from cash flow. That reads backwards economically, but it
+        # is what equations (1), (2) and (21) specify, and reproducing the published
+        # model is the point of this package. Do not "correct" it to a multiplication
+        # without also renumbering the results the paper reports.
+        ex = (1.0 + finance.alpha_excess_cash) ** 30
+        bd = (1.0 + finance.beta_delayed_pay) ** 30
+        gL = (1.0 + finance.gamma_LTL) ** 30
+        dS = (1.0 + finance.delta_STL) ** 30
 
         # (20) CF[1] = IC + STL[1] + LTL + PA[1] - TBU[1]
         def CF1_rule(_m):
-            return _m.CF[1] == (
-                _m.IC + _m.STL[1] + _m.LTL + _m.PA[1] - _m.TBU[1] - _terminal_settlement(_m, 1)
-            )
+            return _m.CF[1] == _m.IC + _m.STL[1] + _m.LTL + _m.PA[1] - _m.TBU[1]
 
         m.cf1 = Constraint(rule=CF1_rule)
         self._log_debug("constraint_cashflow_initial_defined", count=1)
@@ -1136,9 +1136,8 @@ class RCPSP_CF_IVFTH:
                 + _m.PA[y]
                 + _m.DP[y - 1] * bd
                 - _m.TBU[y]
-                - _m.LTL * gL
-                - _m.STL[y - 1] * dS
-                - _terminal_settlement(_m, y)
+                - _m.LTL / gL
+                - _m.STL[y - 1] / dS
             )
 
         m.cfy = Constraint(m.Y, rule=CFy_rule)

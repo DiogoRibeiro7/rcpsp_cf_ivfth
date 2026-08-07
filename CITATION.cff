@@ -56,6 +56,18 @@ preferred-citation:
 references:
   - type: article
     title: "A New Bi-Objective Model for Resource-Constrained Project Scheduling and Cash Flow Problems with Financial Constraints under Uncertainty: A Case Study"
+    authors:
+      - family-names: Mirnezami
+        given-names: Seyed-Ali
+      - family-names: Ghasemi
+        given-names: Mohammad
+      - family-names: Shahabi-Shahmiri
+        given-names: Reza
+    url: "https://arxiv.org/abs/2509.00002"
+    identifiers:
+      - type: other
+        value: "arXiv:2509.00002"
+        description: "arXiv preprint identifier"
     notes: "Original paper describing the mathematical model implemented in this software package"
   - type: software
     title: Pyomo

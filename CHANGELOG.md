@@ -7,49 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0] - 2026-08-07
 
-This release corrects four defects in the MILP formulation. **Every numerical result
-produced by 1.x differs from 2.0.0**, so results published from an earlier version
-cannot be compared against this one without re-running them.
+This release corrects two defects where the implementation departed from the source
+paper (Mirnezami, Ghasemi & Shahabi-Shahmiri, arXiv:2509.00002), plus a number of
+reporting and tooling problems. **Numerical results differ from 1.x**, so earlier
+results cannot be compared against this version without re-running them.
+
+Constraint numbers below refer to the paper's equations.
 
 ### Fixed
 
-- **Payments were unbounded, so the model could invent cash.** Constraint (18) was
-  written as `Σ PA_im·XYp − PA[y] ≤ DP[y]`, which bounds `PA[y]` only from *below*.
-  Because `PA[y]` is a free non-negative variable that feeds the cash-flow
-  recurrence, the solver could set it arbitrarily high. On the shipped toy instance
-  it returned `PA[1] = 111,999.98` against total real payments of `8,400`.
+- **Resources were never released** — the implementation did not match constraints
+  (9)/(10) and (31)/(32). Those sum resource demand over a *window* the length of the
+  activity's duration; the code instead summed `r·X[i,m,h]` over *every* start day
+  `h ≤ t`, so an activity consumed resources from its start day to the end of the
+  horizon and the profile could only ever rise. Verified on the toy instance: `BR[1]`
+  stayed at 9.0 from day 8 to day 60 although A1 completed on day 8.
 
-  The practical effect was that `mu2` reached `1.0` in every run, so the second
-  objective was always fully satisfied and the bi-objective trade-off never
-  happened — the model effectively minimised makespan alone. The balance is now an
-  equality, `Σ PA_im·XYp == PA[y] + DP[y]`, and nothing may be deferred past the
-  final period.
+  Demand is now summed over `h ∈ [t − span + 1, t]`, with `span` the expected value
+  `(d_o + 2·d_m + d_p)/4` of the lower triangle, as (31)/(32) specify. This also drops
+  constraint building from quadratic in the horizon to linear in the span.
 
-- **Resources were never released.** The daily demand constraints summed
-  `r·X[i,m,h]` over *every* start day `h ≤ t`, so an activity consumed resources
-  from its start day to the end of the horizon and the resource profile could only
-  ever rise. Demand is now summed over the activity's active window,
-  `h ∈ [t − span + 1, t]`, where `span` is the alpha-blended duration rounded up to
-  whole days — the same blend the precedence constraint uses. This also drops the
-  constraint-building cost from quadratic in the horizon to linear in the span.
+  Note that (31)/(32) print the window as `h = t … t + span − 1`, which would have an
+  activity consuming resources *before* it starts. That reading is untenable, so the
+  transposed window is used.
 
-- **Loan repayment moved the wrong way with the interest rate.** The recurrence
-  discounted repayments as `LTL / (1+γ)^30` and `STL[y-1] / (1+δ)^30`, which made
-  debt *cheaper* as rates rose. Repayment is now `STL[y-1] · (1+δ)` for short-term
-  loans and `LTL · γ` per period of interest service on the long-term loan.
+- **Payments were unbounded, so the model could invent cash.** Constraint (18) is
+  printed as `Σ PA_im·XYp − PA[y] ≤ DP[y]`, which bounds `PA[y]` only from *below*.
+  Because `PA[y]` is a free non-negative variable feeding the cash-flow recurrence,
+  the solver could set it arbitrarily high: the toy instance returned
+  `PA[1] = 111,999.98` against total real payments of `8,400`, and `CF_final` simply
+  tracked whatever `Z2_PIS` asked for, pinning `mu2` at `1.0` in every run. The
+  second objective was effectively absent from the problem.
 
-  The final period additionally settles outstanding principal, so `Z2 = CF[Yn]`
-  measures cash the project keeps rather than money it has borrowed and not repaid.
-  Previously a loan drawn in the last period was pure profit.
+  The balance is now an equality, `Σ PA_im·XYp == PA[y] + DP[y]`, with nothing
+  deferred past the final period. **This is a deliberate departure from (18) as
+  printed**, and the only one in this release. It matches the model the paper
+  describes in prose — payments "permitted to be delayed partly or completely", with
+  "the delayed payments of the last period received in the next period" — and without
+  it the second objective cannot be optimised at all.
 
-- **Interest rates are applied per accounting period.** The rates were documented as
-  "per 30-day period" but raised to the 30th power, turning the toy instance's 6%
-  long-term rate into 474%. They are now effective per-period rates applied directly.
-
-- **Reported activity durations were one day too long.** `extract_solution` computed
-  `finish − start + 1`, but the model releases an activity on its `finish` day and
-  lets successors start that same day. Durations are now `finish − start`, and
-  zero-duration milestones render as markers rather than invisible Gantt bars.
+- **Reported activity durations were one day too long.** Constraint (13) sets
+  completion to `start + d` and precedence (8) lets a successor start on that same
+  day, so `extract_solution`'s `finish − start + 1` over-counted by one and made
+  consecutive Gantt bars overlap. Durations are now `finish − start`, and
+  zero-duration milestones render as markers rather than invisible bars.
 
 - **`plot_metric_trends` rejected its own primary input.** It validated `x_column`
   against `df.columns` *before* calling `reset_index()`, so plotting the output of
@@ -71,10 +72,12 @@ cannot be compared against this one without re-running them.
 ### Added
 
 - `ResourceParams`, carrying renewable capacity (per day) and non-renewable capacity
-  (total across the horizon). This is what makes the problem resource-*constrained*:
-  before, the only limit on resource use was `FinanceParams.CC_daily_cap`, a cost cap.
-  It is an optional fourth positional argument to `RCPSP_CF_IVFTH`; omitting it
-  reproduces the unconstrained behaviour.
+  (total across the horizon). **This is an extension beyond the published model, not
+  a fix.** The paper has no availability parameter — `BR_kt` and `WR_lt` are free
+  variables and resource use is bounded only indirectly, through the maximum daily
+  resource cost `CC` in constraint (12). `ResourceParams` is an optional fourth
+  positional argument to `RCPSP_CF_IVFTH`; omitting it (the default) reproduces the
+  paper's formulation exactly.
 - `build_toy_resources()`, giving the toy instance limits that force a real
   makespan-versus-resource trade-off.
 - `sensitivity`, `solvers` and `dev` extras. `pandas` is required by
@@ -95,6 +98,18 @@ cannot be compared against this one without re-running them.
   hand-maintained literal.
 - All references to the software DOI use `10.5281/zenodo.17382196`; `CITATION.cff`,
   `codemeta.json` and the README previously carried a second, inconsistent DOI.
+
+### Deliberately unchanged
+
+The cash-flow recurrence (20)-(21) is left exactly as published, including the two
+loan terms `− LTL/(1+γ)^30` and `− STL[y-1]/(1+δ)^30`. Because these are divisions,
+a *higher* interest rate deducts *less* from cash flow, which reads backwards
+economically and invites a well-meaning correction. It is nonetheless what equations
+(1), (2) and (21) specify, and reproducing the published model is the purpose of this
+package. The behaviour is pinned by tests in `tests/test_model_semantics.py`.
+
+For the same reason the four interest rates remain *daily* rates compounded over a
+30-day period, per equations (1)-(4).
 
 ## [1.0.1]
 
