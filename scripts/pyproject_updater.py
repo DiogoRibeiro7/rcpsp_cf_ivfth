@@ -10,7 +10,8 @@ Features
 - Fetches the latest version from PyPI (skips yanked releases; pre-releases optional).
 - Multiple update strategies: exact | caret | tilde | floor.
 - By default respects the current major version unless --allow-major is set.
-- Can target specific groups (Poetry group or PEP 621 optional-dependencies) and/or specific packages.
+- Can target specific groups (Poetry group or PEP 621 optional-dependencies)
+  and/or specific packages.
 - Dry-run `--check` prints a unified diff without writing.
 
 Usage
@@ -40,12 +41,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import tomlkit
 from packaging.requirements import Requirement
 from packaging.version import InvalidVersion, Version
+
+# Leading characters of a version specifier, stripped to expose the base version.
+# This is a character set for str.lstrip, not a substring to remove.
+_SPEC_PREFIX_CHARS = "^~=<>! "
 
 
 @dataclass(frozen=True)
@@ -178,7 +182,8 @@ def _pep440_string_for_strategy(v: Version, strategy: str) -> str:
 
 def _respect_major_allowed(current_spec: str | None, latest: Version, allow_major: bool) -> bool:
     """If allow_major is False and current_spec indicates a major cap, avoid bumping across majors.
-    Heuristic: extract existing max major from spec if present; otherwise compare against any pinned/ranged major.
+    Heuristic: extract the existing max major from the spec if present; otherwise
+    compare against any pinned/ranged major.
     """
     if allow_major:
         return True
@@ -192,11 +197,12 @@ def _respect_major_allowed(current_spec: str | None, latest: Version, allow_majo
             else Requirement(f"pkg {current_spec}")
         )
     except Exception:
-        # Fallback: if spec starts with ^ or ~ (Poetry), infer major from latest string of spec if present
+        # Fallback: if the spec starts with ^ or ~ (Poetry), infer the major from
+        # the latest string of the spec if present
         if current_spec.startswith("^") or current_spec.startswith("~"):
             # Keep within the current major implied by the spec's base number
             try:
-                base = Version(current_spec.lstrip("^~=>=<=!~^ "))
+                base = Version(current_spec.lstrip(_SPEC_PREFIX_CHARS))
                 return latest.major <= base.major
             except Exception:
                 return True
@@ -357,7 +363,8 @@ def upgrade(pyproject: Path, opts: Options) -> int:
             continue
 
         if not _respect_major_allowed(dep.current_spec, latest, opts.allow_major):
-            # If not allowed, try to keep within current major by taking the max version < next major.
+            # If not allowed, keep within the current major by taking the max
+            # version below the next major.
             target_major = None
             # Guess current allowed major from current spec or dep.current_spec base
             try:

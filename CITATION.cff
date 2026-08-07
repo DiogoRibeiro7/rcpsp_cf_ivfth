@@ -18,7 +18,7 @@ authors:
 repository-code: "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
 url: "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
 license: MIT
-version: "1.0.0"
+version: "2.0.0"
 date-released: "2025-09-11"
 doi: 10.5281/zenodo.17382196
 identifiers:
@@ -47,15 +47,27 @@ preferred-citation:
     - family-names: Ribeiro
       given-names: Diogo
       email: dfr@esmad.ipp.pt
-  version: "1.0.0"
+  version: "2.0.0"
   date-released: "2025-09-11"
-  doi: 10.5281/zenodo.1733326
+  doi: 10.5281/zenodo.17382196
   repository-code: "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth"
   license: MIT
   notes: "Python/Pyomo implementation of the extended IVF-TH scalarization model"
 references:
   - type: article
     title: "A New Bi-Objective Model for Resource-Constrained Project Scheduling and Cash Flow Problems with Financial Constraints under Uncertainty: A Case Study"
+    authors:
+      - family-names: Mirnezami
+        given-names: Seyed-Ali
+      - family-names: Ghasemi
+        given-names: Mohammad
+      - family-names: Shahabi-Shahmiri
+        given-names: Reza
+    url: "https://arxiv.org/abs/2509.00002"
+    identifiers:
+      - type: other
+        value: "arXiv:2509.00002"
+        description: "arXiv preprint identifier"
     notes: "Original paper describing the mathematical model implemented in this software package"
   - type: software
     title: Pyomo

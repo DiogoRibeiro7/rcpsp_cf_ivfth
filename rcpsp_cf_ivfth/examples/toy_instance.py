@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
-from ..data import Activity, ModeData, FinanceParams, CalendarParams
+from ..data import Activity, CalendarParams, FinanceParams, ModeData, ResourceParams
 from ..fuzzy import NIVTF, create_triangle
 
 
@@ -120,6 +120,20 @@ def build_toy_instance() -> Tuple[Dict[str, Activity], FinanceParams, CalendarPa
     return activities, finance, calendar
 
 
+def build_toy_resources() -> ResourceParams:
+    """
+    Availability limits that make the toy instance genuinely resource-constrained.
+
+    Renewable resource 1 is capped just below what A1's faster mode 2 needs, so the
+    schedule has to trade makespan against resource use rather than always picking
+    the quickest mode.
+    """
+    return ResourceParams(
+        renewable_capacity={1: 4.5, 2: 3.0},
+        nonrenewable_capacity={1: 40.0},
+    )
+
+
 def run_toy_example() -> None:
     """Solve the toy instance using the first available MILP solver."""
     from pyomo.environ import SolverFactory
@@ -127,7 +141,7 @@ def run_toy_example() -> None:
     from .. import RCPSP_CF_IVFTH, IVFTHTargets, IVFTHWeights
 
     activities, finance, calendar = build_toy_instance()
-    ivfth = RCPSP_CF_IVFTH(activities, finance, calendar)
+    ivfth = RCPSP_CF_IVFTH(activities, finance, calendar, build_toy_resources())
 
     targets = IVFTHTargets(
         alpha_level=0.5,
@@ -140,14 +154,14 @@ def run_toy_example() -> None:
 
     model = ivfth.build_model(targets, weights)
 
-    for solver_name in ("cbc", "glpk"):
+    for solver_name in ("cbc", "glpk", "appsi_highs"):
         solver = SolverFactory(solver_name)
-        if solver.available():
+        if solver.available(exception_flag=False):
             result = ivfth.solve(model, solver_name=solver_name)
             print(f"Solved with {solver_name}: {result}")
             break
     else:
-        print("Toy instance model built, but no CBC or GLPK solver was found.")
+        print("Toy instance model built, but no CBC, GLPK or HiGHS solver was found.")
 
 
 if __name__ == "__main__":

@@ -4,155 +4,124 @@ on:
   push:
     branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        # Keep in sync with requires-python and the classifiers in pyproject.toml.
+        # The floor is 3.10 because pyomo >= 6.10 requires it.
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
-        
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # Full matrix on Linux; spot-check the ends of the range elsewhere.
+        exclude:
+          - {os: windows-latest, python-version: "3.11"}
+          - {os: windows-latest, python-version: "3.12"}
+          - {os: macos-latest, python-version: "3.11"}
+          - {os: macos-latest, python-version: "3.12"}
+
     steps:
     - uses: actions/checkout@v6
-    
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
-    
-    - name: Install system dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y glpk-utils
-    
-    - name: Install system dependencies (macOS)
-      if: matrix.os == 'macos-latest'
-      run: |
-        brew install glpk
-    
-    - name: Install CBC solver (cross-platform)
+        cache: pip
+
+    # HiGHS ships as a wheel on every platform in the matrix, so solver-backed tests
+    # run everywhere instead of being silently skipped.
+    - name: Install package and test dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install pyomo
-        # Try to get CBC via conda if available, otherwise skip
-        python -c "
-        try:
-            import subprocess
-            subprocess.check_call(['conda', 'install', '-c', 'conda-forge', 'coincbc', '-y'])
-            print('CBC installed via conda')
-        except:
-            print('CBC installation skipped - will use GLPK or skip solver tests')
-        "
-      continue-on-error: true
-    
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install pytest pytest-cov pyomo
-        python -m pip install pytest-xdist
-    
-    - name: Check solver availability
+        python -m pip install -e ".[test]"
+
+    - name: Report available solvers
       run: |
         python -c "
         from pyomo.environ import SolverFactory
-        for solver in ['glpk', 'cbc']:
-            try:
-                opt = SolverFactory(solver)
-                if opt.available():
-                    print(f'{solver}: Available')
-                else:
-                    print(f'{solver}: Not available')
-            except:
-                print(f'{solver}: Error checking')
+        for name in ['cbc', 'glpk', 'appsi_highs']:
+            print(f'{name}: {SolverFactory(name).available(exception_flag=False)}')
         "
-    
-    - name: Run tests without coverage (non-Ubuntu)
-      if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.10'
-      run: |
-        python run_tests.py --fast
-    
-    - name: Run tests with coverage (Ubuntu Python 3.10)
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
-      run: |
-        python run_tests.py --coverage --html-coverage
-    
+
+    - name: Run tests
+      run: python -m pytest
+
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
       uses: codecov/codecov-action@v6
       with:
-        file: ./coverage.xml
+        files: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
 
+  # The package must remain importable and the non-solver tests must pass with no
+  # MILP backend installed at all.
   test-no-solver:
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v6
-    
-    - name: Set up Python 3.10
+
+    - name: Set up Python
       uses: actions/setup-python@v6
       with:
-        python-version: "3.10"
-    
-    - name: Install Python dependencies (no solvers)
+        python-version: "3.12"
+        cache: pip
+
+    - name: Install without any solver
       run: |
         python -m pip install --upgrade pip
-        python -m pip install pytest pytest-cov
-        python -m pip install pyomo  # Install Pyomo but no solvers
-    
-    - name: Run tests without solver dependency
-      run: |
-        python run_tests.py --no-solver -v
-    
-    - name: Verify no solvers available
+        python -m pip install -e .
+        python -m pip install pytest pytest-cov matplotlib pandas
+
+    - name: Verify no solver is available
       run: |
         python -c "
         from pyomo.environ import SolverFactory
-        solvers = ['glpk', 'cbc', 'gurobi', 'cplex']
-        available = [s for s in solvers if SolverFactory(s).available()]
-        print(f'Available solvers: {available}')
-        assert len(available) == 0, f'Expected no solvers, but found: {available}'
-        print('Confirmed no solvers available - tests should skip solver-dependent functionality')
+        available = [s for s in ['glpk', 'cbc', 'gurobi', 'cplex', 'appsi_highs']
+                     if SolverFactory(s).available(exception_flag=False)]
+        assert not available, f'Expected no solvers, found: {available}'
+        print('Confirmed: no MILP solver installed')
         "
+
+    - name: Run solver-independent tests
+      run: python -m pytest -m "not solver" --cov-fail-under=0
 
   lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10"]
-    
+
     steps:
     - uses: actions/checkout@v6
-    
-    - name: Set up Python ${{ matrix.python-version }}
+
+    - name: Set up Python
       uses: actions/setup-python@v6
       with:
-        python-version: ${{ matrix.python-version }}
-    
+        python-version: "3.12"
+        cache: pip
+
     - name: Install linting dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install black flake8 isort mypy
-        python -m pip install pyomo
-    
+        python -m pip install -e ".[dev]"
+
     - name: Run black (code formatting)
-      run: |
-        black --check --diff rcpsp_cf_ivfth/ tests/
-    
+      run: black --check --diff rcpsp_cf_ivfth/ tests/ scripts/
+
     - name: Run isort (import sorting)
-      run: |
-        isort --check-only --diff rcpsp_cf_ivfth/ tests/
-    
+      run: isort --check-only --diff rcpsp_cf_ivfth/ tests/ scripts/
+
     - name: Run flake8 (linting)
-      run: |
-        flake8 rcpsp_cf_ivfth/ tests/ --max-line-length=100 --extend-ignore=E203,W503
-    
+      run: flake8 rcpsp_cf_ivfth/ tests/ scripts/
+
     - name: Run mypy (type checking)
-      run: |
-        mypy rcpsp_cf_ivfth/ --ignore-missing-imports
+      run: mypy rcpsp_cf_ivfth/ --ignore-missing-imports
       continue-on-error: true

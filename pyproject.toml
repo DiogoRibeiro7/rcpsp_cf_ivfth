@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rcpsp-cf-ivfth"
-version = "1.0.1"
+version = "2.0.0"
 description = "Bi-objective RCPSP with cash-flow constraints under fuzzy uncertainty"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
     {name = "Diogo Ribeiro", email = "dfr@esmad.ipp.pt"}
@@ -25,9 +25,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 dependencies = [
@@ -38,6 +39,14 @@ dependencies = [
 visualization = [
     "matplotlib>=3.5",
 ]
+# rcpsp_cf_ivfth.sensitivity returns pandas DataFrames and plots them.
+sensitivity = [
+    "matplotlib>=3.5",
+    "pandas>=1.5",
+]
+solvers = [
+    "highspy>=1.7",
+]
 docs = [
     "beautifulsoup4>=4.12",
     "markdownify>=0.11",
@@ -46,6 +55,15 @@ docs = [
 test = [
     "pytest>=7",
     "pytest-cov>=4",
+    "matplotlib>=3.5",
+    "pandas>=1.5",
+    "highspy>=1.7",
+]
+dev = [
+    "black>=24",
+    "flake8>=6",
+    "isort>=5.12",
+    "mypy>=1.8",
 ]
 
 [project.urls]
@@ -56,3 +74,38 @@ Documentation = "https://github.com/DiogoRibeiro7/rcpsp_cf_ivfth/tree/main/docs"
 
 [tool.setuptools.packages.find]
 include = ["rcpsp_cf_ivfth*"]
+
+# Pytest configuration lives here rather than in pytest.ini: the old pytest.ini used a
+# [tool:pytest] header, which is only valid in setup.cfg, so every setting in it -
+# including the coverage gate - was silently ignored.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "--cov=rcpsp_cf_ivfth",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=80",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "solver: marks tests that require a MILP solver",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100

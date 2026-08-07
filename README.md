@@ -2,37 +2,52 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17382196.svg)](https://doi.org/10.5281/zenodo.17382196)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 Bi-objective **Resource-Constrained Project Scheduling with Cash-Flow** under **fuzzy uncertainty** (NIVTF), solved via an **extended IVF–TH** scalarization and MILP.
 
 This repository implements the model from:
 
-> _A New Bi-Objective Model for Resource-Constrained Project Scheduling and Cash Flow Problems with Financial Constraints under Uncertainty: A Case Study_ (multi-mode RCPSP, cash-flow constraints, delayed payments, interest on loans/excess cash, and interval-valued fuzzy numbers)
+> Mirnezami, S.-A., Ghasemi, M., & Shahabi-Shahmiri, R. _A New Bi-Objective Model for
+> Resource-Constrained Project Scheduling and Cash Flow Problems with Financial
+> Constraints under Uncertainty: A Case Study_.
+> [arXiv:2509.00002](https://arxiv.org/abs/2509.00002)
+
+Multi-mode RCPSP with cash-flow constraints, delayed payments, interest on
+loans/excess cash, and interval-valued fuzzy numbers. Equation numbers referenced
+throughout this README and in the source comments are the paper's.
 
 --------------------------------------------------------------------------------
 
 ## Features
 
 - **Bi-objective MILP**: minimize **makespan** (Cmax) and maximize **final cash flow** (CF in the last period).
-- **Multi-mode activities** with **renewable/non-renewable** resources.
+- **Multi-mode activities** with **renewable/non-renewable** resources and optional **availability limits**.
 - **Daily & periodic costs**, **initial capital**, **short-/long-term loans**, **credit limits**, **delayed payments** (≤ 1 period).
 - **Uncertainty** in durations and resource demands via **Normalized Interval-Valued Triangular Fuzzy (NIVTF)** numbers.
 - **Extended IVF–TH** scalarization (Torabi–Hassini) to convert the fuzzy bi-objective to a single-objective MILP.
-- Written in pure Python with **Pyomo**. Works with GLPK/CBC/CPLEX/Gurobi.
+- Written in pure Python with **Pyomo**. Works with HiGHS/GLPK/CBC/CPLEX/Gurobi.
+
+> **Upgrading from 1.x?** Version 2.0.0 corrects two places where the implementation
+> departed from the paper, so numerical results change. See the
+> [CHANGELOG](CHANGELOG.md) and *Deviations from the paper* below before comparing
+> against previously published runs.
 
 --------------------------------------------------------------------------------
 
 ## Repository layout
 
-```
+```text
 rcpsp_cf_ivfth/
 ├── __init__.py           # Main package exports
-├── fuzzy.py             # NIVTF fuzzy number definitions
-├── data.py              # Data structures (Activity, FinanceParams, etc.)
-├── model.py             # Main RCPSP_CF_IVFTH solver class
+├── fuzzy.py              # NIVTF fuzzy number definitions
+├── data.py               # Data structures (Activity, FinanceParams, ResourceParams, ...)
+├── model.py              # Main RCPSP_CF_IVFTH solver class
+├── sensitivity.py        # Alpha / weight / finance sweeps (needs pandas)
+├── visualization.py      # Gantt, resource, cash-flow plots and exports (needs matplotlib)
 └── examples/
     ├── __init__.py
+    ├── __main__.py       # `python -m rcpsp_cf_ivfth.examples`
     └── toy_instance.py   # Example usage with toy data
 ```
 
@@ -40,28 +55,32 @@ rcpsp_cf_ivfth/
 
 ## Installation
 
-### With Poetry (recommended)
-
-```bash
-poetry init --no-interaction
-poetry add pyomo
-# Add a MILP solver; choose one you have:
-# GLPK (Linux): sudo apt-get install glpk-utils
-# CBC (cross-platform via conda): conda install -c conda-forge coincbc
-poetry run python -m rcpsp_cf_ivfth.examples.toy_instance
-```
-
-### With pip
-
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install pyomo
-# Install a solver (e.g., cbc or glpk) and ensure it's on PATH
-python -m rcpsp_cf_ivfth.examples.toy_instance
+
+pip install -e .                     # core: pyomo only
+pip install -e ".[solvers]"          # adds HiGHS (a wheel, no system packages needed)
+pip install -e ".[visualization]"    # adds matplotlib
+pip install -e ".[sensitivity]"      # adds pandas + matplotlib
+pip install -e ".[test,dev]"         # everything needed to run the test suite and linters
+
+python -m rcpsp_cf_ivfth.examples
 ```
 
-> **Solver note:** Set the solver in code: `ivfth.solve(model, solver_name="glpk")`. Alternatives: `"cbc"`, `"gurobi"`, `"cplex"` (if licensed/installed).
+You need one MILP solver. **HiGHS** is the easiest — it installs as a wheel on every
+platform via `pip install highspy` and needs nothing on `PATH`. Alternatives:
+
+| Solver | Install | `solver_name` |
+| --- | --- | --- |
+| HiGHS | `pip install highspy` | `"appsi_highs"` |
+| GLPK | `apt-get install glpk-utils` / `brew install glpk` | `"glpk"` |
+| CBC | `conda install -c conda-forge coincbc` | `"cbc"` |
+| Gurobi / CPLEX | vendor installer (licence required) | `"gurobi"` / `"cplex"` |
+
+> **Solver note:** Set the solver in code: `ivfth.solve(model, solver_name="appsi_highs")`.
+> If the model is infeasible, `solve()` raises a `RuntimeError` naming the termination
+> condition rather than failing inside Pyomo.
 
 --------------------------------------------------------------------------------
 
@@ -70,7 +89,7 @@ python -m rcpsp_cf_ivfth.examples.toy_instance
 Run the example with:
 
 ```bash
-python -m rcpsp_cf_ivfth.examples.toy_instance
+python -m rcpsp_cf_ivfth.examples
 ```
 
 Expected console summary (varies by solver/params):
@@ -93,7 +112,7 @@ Solve summary:
 ```python
 from rcpsp_cf_ivfth import (
     RCPSP_CF_IVFTH, Activity, ModeData, FinanceParams, CalendarParams,
-    IVFTHTargets, IVFTHWeights, NIVTF, create_triangle
+    ResourceParams, IVFTHTargets, IVFTHWeights, NIVTF, create_triangle
 )
 
 # 1. Define your activities with modes, NIVTF durations, resource usage, and payments
@@ -110,12 +129,13 @@ activities = {
     # ... define your real activities
 }
 
-# 2. Define finance parameters
+# 2. Define finance parameters.
+#    All four rates are *daily* rates, compounded over a 30-day period by the model.
 finance = FinanceParams(
-    alpha_excess_cash=0.0125,   # Interest rates
-    beta_delayed_pay=0.10,
-    gamma_LTL=0.06,
-    delta_STL=0.075,
+    alpha_excess_cash=0.0125,   # Excess cash:     CF_{y-1} * (1+alpha)^30
+    beta_delayed_pay=0.10,      # Delayed payment: DP_{y-1} * (1+beta)^30
+    gamma_LTL=0.06,             # Long-term loan:  LTL      / (1+gamma)^30
+    delta_STL=0.075,            # Short-term loan: STL_{y-1}/ (1+delta)^30
     IC=10000.0,                 # Initial capital
     max_LTL=5000.0,             # Loan limits
     max_STL=4000.0,
@@ -125,13 +145,20 @@ finance = FinanceParams(
     CW_l={1: 50.0}
 )
 
-# 3. Define calendar with periods
+# 3. Define resource availability. Optional: omit it and the schedule is limited only
+#    by precedence and the daily cost cap.
+resources = ResourceParams(
+    renewable_capacity={1: 6.0, 2: 3.0},   # Available *each day*
+    nonrenewable_capacity={1: 40.0},       # Available in *total* over the horizon
+)
+
+# 4. Define calendar with periods
 calendar = CalendarParams(
     T_days=60,
     Y_periods=[(1, 30), (31, 60)]  # Two 30-day periods
 )
 
-# 4. Choose IVF–TH targets (PiS/NiS anchors) and weights
+# 5. Choose IVF–TH targets (PiS/NiS anchors) and weights
 targets = IVFTHTargets(
     alpha_level=0.5,
     Z1_PIS=10.0,    # Best makespan (pre-run min-Cmax to estimate)
@@ -142,11 +169,14 @@ targets = IVFTHTargets(
 
 weights = IVFTHWeights(theta1=0.5, theta2=0.5, gamma_tradeoff=0.5)
 
-# 5. Build & solve
-ivfth = RCPSP_CF_IVFTH(activities, finance, calendar)
+# 6. Build & solve
+ivfth = RCPSP_CF_IVFTH(activities, finance, calendar, resources)
 model = ivfth.build_model(targets, weights)
-result = ivfth.solve(model, solver_name="cbc")
+result = ivfth.solve(model, solver_name="appsi_highs")
 print(result)
+
+# 7. Inspect, plot or export the full solution
+solution = ivfth.extract_solution(model, solver_metadata=result)
 ```
 
 ## Finding PiS/NiS targets
@@ -175,9 +205,15 @@ For best results, pre-compute the PiS/NiS anchors by solving single-objective pr
 
 - **FinanceParams**
   - `alpha_excess_cash, beta_delayed_pay, gamma_LTL, delta_STL: float`
+    (effective rates **per accounting period**, applied directly)
   - `IC, max_LTL, max_STL, min_CF, CC_daily_cap: float`
   - `CR_k: Dict[int, float]` (renewable unit costs)
   - `CW_l: Dict[int, float]` (non-renewable unit costs)
+
+- **ResourceParams** (optional)
+  - `renewable_capacity: Dict[int, float]` (k → units available **each day**)
+  - `nonrenewable_capacity: Dict[int, float]` (l → units available **in total**)
+  - A resource omitted from either mapping is unlimited.
 
 - **CalendarParams**
   - `T_days: int`
@@ -194,29 +230,101 @@ For best results, pre-compute the PiS/NiS anchors by solving single-objective pr
   - Unique completion per activity: `∑_{m,t} Xp_{i,m,t} = 1`
   - Period mapping `XYp` (ties completion day to a long period)
 
-- **Resources & costs**
-  - Daily renewable/non-renewable usage upper-bounded via α-blend linearization
+- **Resources & costs** (9)–(12), (31)–(32)
+  - Daily demand counts only activities whose **window covers day `t`**: an activity
+    started at `h` occupies days `h … h + span − 1` and releases its resources
+    afterwards. `span` is the expected value `(d_o + 2·d_m + d_p)/4` of the lower
+    triangle, per (31)/(32) — note this differs from the α-blend that precedence
+    (30) uses.
   - Daily cost `BU_t` ≥ Σ(CR_k·BR_{k,t}) + Σ(CW_l·WR_{l,t})
-  - Daily cap: `BU_t ≤ CC`
+  - Daily cap: `BU_t ≤ CC` — in the published model this is the *only* thing limiting
+    resource use. Explicit availability limits are an optional extension (see
+    `ResourceParams`): `BR_{k,t} ≤ R_k` per day and `∑_t WR_{l,t} ≤ W_l` overall.
 
-- **Finance & cash flow**
+- **Finance & cash flow** (18)–(24)
   - Periodic total cost: `TBU_y = ∑ BU_t` in `[a_y, b_y]`
-  - Cash flow recurrences with interest on **excess**, **delayed payments**, **loans**
+  - Payment balance (≤ 1 period delay): revenue earned in period `y` is either
+    collected then or deferred once — `∑ PA_{i,m}·XYp = PA_y + DP_y`, with
+    `DP_{Y_n} = 0`. See *Deviations from the paper* below.
+  - Cash flow recurrence (21) with interest on **excess cash** `CF_{y−1}(1+α)^30`,
+    **delayed payments** `DP_{y−1}(1+β)^30`, and **loans**
+    `− LTL/(1+γ)^30 − STL_{y−1}/(1+δ)^30`. All four rates are *daily* rates
+    compounded over a 30-day period.
   - Loan caps (`LTL ≤ maxLTL`, `STL_y ≤ maxSTL`), CF floors (`CF_y ≥ minCF`)
-  - Delayed payments balance (≤ 1 period delay)
 
-- **Objectives (IVF–TH)**
+- **Objectives (IVF–TH)** (5), (6), (27), (28)
   - Z1 = `Cmax`, Z2 = `CF_{Y_n}`
   - Memberships `μ1, μ2` linear in (Z1, Z2) using PiS/NiS anchors
   - Scalarization: `max γ·λ + (1-γ)(θ1 μ1 + θ2 μ2)` with `λ ≤ μ1, λ ≤ μ2`
 
 --------------------------------------------------------------------------------
 
+## Deviations from the paper
+
+The reference implementation follows the source
+([arXiv:2509.00002](https://arxiv.org/abs/2509.00002)) equation for equation, with
+two documented exceptions.
+
+**1. Constraint (18) is implemented as an equality.** The paper prints
+
+> `∑_i ∑_m ∑_t PA_{i,m}·XYP_{i,m,y,t} − PA_y ≤ DP_y`
+
+which bounds `PA_y` only from below. Since `PA_y` is a free non-negative variable
+feeding the cash-flow recurrence, the solver can set it arbitrarily high — on the toy
+instance it returns `PA_1 = 111,999.98` against `8,400` of real payments, and
+`CF_final` simply tracks whatever `Z2_PIS` you ask for, pinning `μ2` at 1.0. The
+second objective then has no effect on the solution.
+
+This package uses `∑ PA_{i,m}·XYP = PA_y + DP_y` with `DP_{Y_n} = 0`, matching the
+model the paper describes in prose (payments "permitted to be delayed partly or
+completely"; "delayed payments of the last period can be received in the next
+period"). If you need the printed inequality to reproduce a specific published
+figure, open an issue — it is a one-line change.
+
+**2. The resource window in (31)/(32) is transposed.** The paper writes the sum over
+`h = t … t + span − 1`, which would have an activity consuming resources on days
+*before* it starts. The window is implemented as `h = t − span + 1 … t`, so
+`BR_{k,t}` is the demand actually in place on day `t`.
+
+**Not a deviation:** the loan terms `− LTL/(1+γ)^30` and `− STL_{y−1}/(1+δ)^30` in
+(21) are divisions, so a *higher* interest rate deducts *less* from cash flow. This
+reads backwards economically but is exactly what equations (1), (2) and (21)
+specify, so it is reproduced as published and pinned by tests. Likewise the four
+interest rates are *daily* rates compounded over 30 days, not per-period rates.
+
+Resource availability limits (`ResourceParams`) are an optional **extension**: the
+paper has no availability parameter and bounds resource use only through the maximum
+daily cost `CC`. The default (`resources=None`) reproduces the paper.
+
+--------------------------------------------------------------------------------
+
 ## Reproducibility tips
 
+- Record the package version: the formulation changed in 2.0.0 and results are not
+  comparable across that boundary. See the [CHANGELOG](CHANGELOG.md).
 - Fix solver seeds where supported (CBC/Gurobi).
 - Log solver output (`tee=True`) if you need detailed runs.
 - Document PiS/NiS derivation (pre-runs) for each dataset.
+
+--------------------------------------------------------------------------------
+
+## Development
+
+```bash
+pip install -e ".[test,dev]"
+
+pytest                          # full suite, 80% coverage gate
+pytest -m "not solver"          # skip everything needing a MILP backend
+python run_tests.py --no-solver # same, via the convenience wrapper
+
+black rcpsp_cf_ivfth/ tests/ scripts/
+isort rcpsp_cf_ivfth/ tests/ scripts/
+flake8 rcpsp_cf_ivfth/ tests/ scripts/
+```
+
+Pytest settings live in `[tool.pytest.ini_options]` in `pyproject.toml`; flake8 reads
+`.flake8` because it cannot read `pyproject.toml`. Regenerate `docs/api.md` with
+`python docs/_generate_api_md.py` after changing public docstrings.
 
 --------------------------------------------------------------------------------
 
@@ -233,7 +341,7 @@ For best results, pre-compute the PiS/NiS anchors by solving single-objective pr
 
 If you use this repo in academic work, please cite the original article and this implementation:
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.1733326.svg)](https://doi.org/10.5281/zenodo.1733326)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17382196.svg)](https://doi.org/10.5281/zenodo.17382196)
 ```bibtex
 @software{rcpsp_cf_ivfth_2025,
   author       = {Ribeiro, Diogo},
@@ -243,9 +351,9 @@ If you use this repo in academic work, please cite the original article and this
   month        = sep,
   year         = 2025,
   publisher    = {Zenodo},
-  version      = {1.0.0},
-  doi          = {10.5281/zenodo.1733326},
-  url          = {https://doi.org/10.5281/zenodo.1733326}
+  version      = {2.0.0},
+  doi          = {10.5281/zenodo.17382196},
+  url          = {https://doi.org/10.5281/zenodo.17382196}
 }
 ```
 
