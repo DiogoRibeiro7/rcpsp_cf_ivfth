@@ -22,10 +22,10 @@
 - **Add tests** that increase coverage or prevent regressions.
 
 ## Development Workflow
-1. Fork the repository and create a topic branch from `develop`:
+1. Fork the repository and create a topic branch from `main`:
    ```bash
-   git checkout develop
-   git pull origin develop
+   git checkout main
+   git pull origin main
    git checkout -b feature/short-description
    ```
 2. Install dependencies and set up tooling (see below).
@@ -86,7 +86,7 @@ RCPSP-CF-IVFTH is a Python package that relies on Pyomo and an MILP solver.
 
 ## Submitting Changes
 - Use meaningful commit messages (imperative mood): `Add IVF-TH weight validation`.
-- Open a pull request against `develop` (unless instructed otherwise).
+- Open a pull request against `main` (unless instructed otherwise).
 - Ensure the PR description includes:
   - Summary of the change.
   - Linked issue numbers (e.g. `Closes #42`).
@@ -96,9 +96,10 @@ RCPSP-CF-IVFTH is a Python package that relies on Pyomo and an MILP solver.
 
 ## Release Process
 Releases are handled by maintainers:
-1. Ensure `develop` is green and up to date.
-2. Update version strings within the package.
-3. Tag the release and push to `main`.
+1. Ensure `main` is green and up to date.
+2. Update the version in `pyproject.toml` (the package reads it from installed metadata)
+   and the dates in `CITATION.cff` and `codemeta.json`.
+3. Run the "Release (manual, from pyproject)" workflow, which tags and publishes.
 4. Publish release notes summarizing major changes and migration steps.
 
 ## Community Expectations

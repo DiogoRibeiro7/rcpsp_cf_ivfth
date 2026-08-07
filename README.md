@@ -333,7 +333,7 @@ Pytest settings live in `[tool.pytest.ini_options]` in `pyproject.toml`; flake8 
 - Read the [Contributing guide](CONTRIBUTING.md) for setup instructions, coding standards, and workflow tips.
 - Participation is governed by our [Code of Conduct](CODE_OF_CONDUCT.md); please review it before engaging.
 - Report security issues privately via the process described in [SECURITY.md](SECURITY.md).
-- File bugs or feature requests using the GitHub issue templates; open pull requests against the `develop` branch.
+- File bugs or feature requests using the GitHub issue templates; open pull requests against the `main` branch.
 
 --------------------------------------------------------------------------------
 
