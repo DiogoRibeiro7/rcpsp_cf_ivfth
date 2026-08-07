@@ -53,7 +53,7 @@ docs = [
     "pdoc>=14",
 ]
 test = [
-    "pytest>=7",
+    "pytest>=8.4.2",
     "pytest-cov>=4",
     "matplotlib>=3.5",
     "pandas>=1.5",
