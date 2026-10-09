@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/project-logo.png" alt="rcpsp_cf_ivfth project logo" width="160" height="160">
+</p>
+
 # RCPSP-CF-IVFTH
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17382196.svg)](https://doi.org/10.5281/zenodo.17382196)

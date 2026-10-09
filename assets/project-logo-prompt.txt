@@ -1,0 +1,7 @@
+Tool: built-in image generation
+
+Use case: logo-brand.
+Asset type: square README project logo for rcpsp_cf_ivfth.
+Project purpose: Project scheduling optimization with financial constraints and fuzzy uncertainty. Multi-mode activities, loans, resource limits. Python/Pyomo.
+Design direction: Three thick coral, blue and clay scheduling beams interlock across a small stepped architectural frame, held in balance by one suspended circular counterweight. Axonometric architectural-pencil illustration on off-white, light construction hatching and bold colored spans. A compact metaphor for time, resources and financial constraints.
+Composition: create one finished square artwork with a strong silhouette, readable at 160 pixels, and comfortable margins. This is the logo itself, not a presentation or product mockup. No text, words, letters, numbers, captions or watermark anywhere in the image. Do not use a generic navy-and-gold metallic badge.
